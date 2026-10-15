@@ -57,9 +57,9 @@ const CATEGORIES = [
   { name: "Health", icon: HeartPulse, color: "#d84b72" },
 ];
 
-// Resize uploaded photos to reduce browser storage usage.
-const processProfilePhoto = (file) =>
-  new Promise((resolve, reject) => {
+// Compress a photo before saving it in browser storage.
+function processProfilePhoto(file) {
+  return new Promise((resolve, reject) => {
     const reader = new FileReader();
 
     reader.onerror = () => {
@@ -70,7 +70,7 @@ const processProfilePhoto = (file) =>
       const image = new Image();
 
       image.onerror = () => {
-        reject(new Error("The selected image could not be opened."));
+        reject(new Error("Unable to open the selected image."));
       };
 
       image.onload = () => {
@@ -115,32 +115,41 @@ const processProfilePhoto = (file) =>
 
     reader.readAsDataURL(file);
   });
+}
 
 function Dashboard() {
   const navigate = useNavigate();
   const photoInputRef = useRef(null);
+  const photoRequestRef = useRef(0);
 
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const [members, setMembers] = useState([]);
+  const [myPhoto, setMyPhoto] = useState("");
+
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [editingSelf, setEditingSelf] = useState(false);
 
   const [memberName, setMemberName] = useState("");
   const [relationship, setRelationship] = useState("");
   const [memberPhoto, setMemberPhoto] = useState("");
+  const [processingPhoto, setProcessingPhoto] = useState(false);
 
-  const [editingId, setEditingId] = useState(null);
   const [activeTab, setActiveTab] = useState("Home");
   const [search, setSearch] = useState("");
   const [error, setError] = useState("");
-  const [processingPhoto, setProcessingPhoto] = useState(false);
 
   const storageKey = user
     ? `family-app-members-${user.id}`
     : null;
 
-  // Load Cognito user.
+  const myPhotoKey = user
+    ? `family-app-profile-photo-${user.id}`
+    : null;
+
+  // Load authenticated Cognito user.
   useEffect(() => {
     let active = true;
 
@@ -179,7 +188,7 @@ function Dashboard() {
     };
   }, [navigate]);
 
-  // Load saved family members.
+  // Load family members saved for this Cognito user.
   useEffect(() => {
     if (!storageKey) return;
 
@@ -194,9 +203,23 @@ function Dashboard() {
     }
   }, [storageKey]);
 
+  // Load logged-in user's own profile photo.
+  useEffect(() => {
+    if (!myPhotoKey) return;
+
+    try {
+      setMyPhoto(localStorage.getItem(myPhotoKey) || "");
+    } catch (err) {
+      console.error("Unable to load profile photo:", err);
+      setMyPhoto("");
+    }
+  }, [myPhotoKey]);
+
   const closeModal = () => {
+    photoRequestRef.current += 1;
     setShowAddModal(false);
     setEditingId(null);
+    setEditingSelf(false);
     setMemberName("");
     setRelationship("");
     setMemberPhoto("");
@@ -205,6 +228,8 @@ function Dashboard() {
   };
 
   const openAddModal = () => {
+    photoRequestRef.current += 1;
+    setEditingSelf(false);
     setEditingId(null);
     setMemberName("");
     setRelationship("");
@@ -215,6 +240,8 @@ function Dashboard() {
   };
 
   const openEditModal = (member) => {
+    photoRequestRef.current += 1;
+    setEditingSelf(false);
     setEditingId(member.id);
     setMemberName(member.name);
     setRelationship(member.relationship);
@@ -224,7 +251,20 @@ function Dashboard() {
     setShowAddModal(true);
   };
 
-  // Handle photo upload.
+  // Open the profile editor for "Me".
+  const openMyProfile = () => {
+    photoRequestRef.current += 1;
+    setEditingSelf(true);
+    setEditingId(null);
+    setMemberName(user.name || "");
+    setRelationship("");
+    setMemberPhoto(myPhoto);
+    setProcessingPhoto(false);
+    setError("");
+    setShowAddModal(true);
+  };
+
+  // Upload and process a profile photo.
   const handlePhotoChange = async (event) => {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -247,21 +287,37 @@ function Dashboard() {
       return;
     }
 
+    const requestId = ++photoRequestRef.current;
+
     setProcessingPhoto(true);
     setError("");
 
     try {
       const processedPhoto = await processProfilePhoto(file);
+
+      if (requestId !== photoRequestRef.current) return;
+
       setMemberPhoto(processedPhoto);
     } catch (err) {
-      console.error("Photo upload error:", err);
+      if (requestId !== photoRequestRef.current) return;
+
+      console.error("Photo processing error:", err);
       setError(err.message || "Unable to process the photo.");
     } finally {
-      setProcessingPhoto(false);
+      if (requestId === photoRequestRef.current) {
+        setProcessingPhoto(false);
+      }
     }
   };
 
-  // Save or update family member.
+  const handleRemovePhoto = () => {
+    photoRequestRef.current += 1;
+    setProcessingPhoto(false);
+    setMemberPhoto("");
+    setError("");
+  };
+
+  // Save own photo or add/edit a family member.
   const handleSaveMember = (event) => {
     event.preventDefault();
     setError("");
@@ -271,6 +327,28 @@ function Dashboard() {
       return;
     }
 
+    // Save logged-in user's own photo.
+    if (editingSelf) {
+      try {
+        if (memberPhoto) {
+          localStorage.setItem(myPhotoKey, memberPhoto);
+        } else {
+          localStorage.removeItem(myPhotoKey);
+        }
+
+        setMyPhoto(memberPhoto);
+        closeModal();
+      } catch (err) {
+        console.error("Unable to save own photo:", err);
+        setError(
+          "Could not save your photo. Browser storage may be full."
+        );
+      }
+
+      return;
+    }
+
+    // Save an added family member.
     const name = memberName.trim();
 
     if (!name) {
@@ -316,14 +394,14 @@ function Dashboard() {
       setMembers(updatedMembers);
       closeModal();
     } catch (err) {
-      console.error("Unable to save member:", err);
+      console.error("Unable to save family member:", err);
       setError(
         "Could not save this member. Browser storage may be full."
       );
     }
   };
 
-  // Delete family member.
+  // Delete an added family member.
   const handleDeleteMember = (id) => {
     if (!window.confirm("Delete this family member?")) {
       return;
@@ -342,8 +420,8 @@ function Dashboard() {
       setMembers(updatedMembers);
       closeModal();
     } catch (err) {
-      console.error("Unable to delete member:", err);
-      setError("Could not delete this member.");
+      console.error("Unable to delete family member:", err);
+      setError("Could not delete this family member.");
     }
   };
 
@@ -375,7 +453,15 @@ function Dashboard() {
         <header className="dashboard-header">
           <div className="dashboard-user">
             <div className="dashboard-avatar">
-              <UserRound size={32} />
+              {myPhoto ? (
+                <img
+                  src={myPhoto}
+                  alt="My profile"
+                  className="family-profile-photo"
+                />
+              ) : (
+                <UserRound size={32} />
+              )}
             </div>
 
             <div className="dashboard-greeting">
@@ -413,7 +499,7 @@ function Dashboard() {
             type="search"
             placeholder='Search "Wife Aadhaar Card"'
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(event) => setSearch(event.target.value)}
             aria-label="Search documents"
           />
 
@@ -445,9 +531,22 @@ function Dashboard() {
           <div className="family-card">
 
             {/* ME PROFILE */}
-            <div className="family-member me-member">
+            <button
+              type="button"
+              className="family-member family-member-button me-member"
+              onClick={openMyProfile}
+              title="Edit my profile photo"
+            >
               <div className="family-avatar me-avatar">
-                <UserRound size={29} />
+                {myPhoto ? (
+                  <img
+                    src={myPhoto}
+                    alt="My profile"
+                    className="family-profile-photo"
+                  />
+                ) : (
+                  <UserRound size={29} />
+                )}
               </div>
 
               <span className="family-member-name">
@@ -457,12 +556,13 @@ function Dashboard() {
               <span className="family-member-relation">
                 {user.name || "Profile"}
               </span>
-            </div>
+            </button>
 
-            {/* FAMILY MEMBERS */}
+            {/* ADDED FAMILY MEMBERS */}
             {members.map((member) => (
               <button
                 key={member.id}
+                type="button"
                 className="family-member family-member-button"
                 onClick={() => openEditModal(member)}
                 title={`Edit ${member.name}`}
@@ -489,8 +589,9 @@ function Dashboard() {
               </button>
             ))}
 
-            {/* ADD MEMBER */}
+            {/* ADD MEMBER BUTTON */}
             <button
+              type="button"
               className="family-member family-member-button"
               onClick={openAddModal}
             >
@@ -614,7 +715,9 @@ function Dashboard() {
         </button>
 
         <button
-          className={activeTab === "My Family" ? "active" : ""}
+          className={
+            activeTab === "My Family" ? "active" : ""
+          }
           onClick={() => setActiveTab("My Family")}
         >
           <Users size={23} />
@@ -630,7 +733,9 @@ function Dashboard() {
         </button>
 
         <button
-          className={activeTab === "Category" ? "active" : ""}
+          className={
+            activeTab === "Category" ? "active" : ""
+          }
           onClick={() => setActiveTab("Category")}
         >
           <LayoutGrid size={23} />
@@ -638,7 +743,9 @@ function Dashboard() {
         </button>
 
         <button
-          className={activeTab === "Settings" ? "active" : ""}
+          className={
+            activeTab === "Settings" ? "active" : ""
+          }
           onClick={() => setActiveTab("Settings")}
         >
           <Settings size={23} />
@@ -646,7 +753,7 @@ function Dashboard() {
         </button>
       </nav>
 
-      {/* ADD / EDIT MEMBER MODAL */}
+      {/* ADD / EDIT PROFILE MODAL */}
       {showAddModal && (
         <div
           className="family-modal-overlay"
@@ -657,16 +764,19 @@ function Dashboard() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="family-modal-title"
-            onClick={(e) => e.stopPropagation()}
+            onClick={(event) => event.stopPropagation()}
           >
             <div className="family-modal-header">
               <h2 id="family-modal-title">
-                {editingId
+                {editingSelf
+                  ? "Edit My Profile"
+                  : editingId
                   ? "Edit Family Member"
                   : "Add Family Member"}
               </h2>
 
               <button
+                type="button"
                 className="dashboard-icon-button"
                 onClick={closeModal}
                 aria-label="Close"
@@ -677,13 +787,13 @@ function Dashboard() {
 
             <form onSubmit={handleSaveMember}>
 
-              {/* PROFILE PHOTO */}
+              {/* PHOTO UPLOAD */}
               <div className="family-photo-section">
                 <div className="family-photo-preview">
                   {memberPhoto ? (
                     <img
                       src={memberPhoto}
-                      alt="Profile preview"
+                      alt="Profile photo preview"
                       className="family-profile-photo"
                     />
                   ) : (
@@ -721,49 +831,69 @@ function Dashboard() {
                   <button
                     type="button"
                     className="family-remove-photo-button"
-                    onClick={() => setMemberPhoto("")}
+                    onClick={handleRemovePhoto}
                   >
                     Remove Photo
                   </button>
                 )}
               </div>
 
-              <label htmlFor="member-name">
-                Full Name
-              </label>
+              {editingSelf ? (
+                <div className="family-self-info">
+                  <p>
+                    <strong>Name:</strong>{" "}
+                    {user.name || "Not provided"}
+                  </p>
+                  <p>
+                    <strong>Email:</strong>{" "}
+                    {user.email || "Not provided"}
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <label htmlFor="member-name">
+                    Full Name
+                  </label>
 
-              <input
-                id="member-name"
-                type="text"
-                placeholder="Enter family member's name"
-                value={memberName}
-                onChange={(e) => setMemberName(e.target.value)}
-                maxLength={100}
-                required
-              />
+                  <input
+                    id="member-name"
+                    type="text"
+                    placeholder="Enter family member's name"
+                    value={memberName}
+                    onChange={(event) =>
+                      setMemberName(event.target.value)
+                    }
+                    maxLength={100}
+                    required
+                  />
 
-              <label htmlFor="member-relationship">
-                Relationship
-              </label>
+                  <label htmlFor="member-relationship">
+                    Relationship
+                  </label>
 
-              <select
-                id="member-relationship"
-                value={relationship}
-                onChange={(e) =>
-                  setRelationship(e.target.value)
-                }
-                required
-              >
-                <option value="">
-                  Select Relationship
-                </option>
+                  <select
+                    id="member-relationship"
+                    value={relationship}
+                    onChange={(event) =>
+                      setRelationship(event.target.value)
+                    }
+                    required
+                  >
+                    <option value="">
+                      Select Relationship
+                    </option>
 
-                {RELATIONSHIPS.map((relation) => (
-                  <option key={relation} value={relation}>
-                    {relation}
-                  </option>
-                ))}
-              </select>
+                    {RELATIONSHIPS.map((relation) => (
+                      <option
+                        key={relation}
+                        value={relation}
+                      >
+                        {relation}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              )}
 
               {error && (
                 <p className="family-form-error">
@@ -776,12 +906,14 @@ function Dashboard() {
                 className="family-save-button"
                 disabled={processingPhoto}
               >
-                {editingId
+                {editingSelf
+                  ? "Save My Photo"
+                  : editingId
                   ? "Save Changes"
                   : "Create Profile"}
               </button>
 
-              {editingId && (
+              {editingId && !editingSelf && (
                 <button
                   type="button"
                   className="family-delete-button"

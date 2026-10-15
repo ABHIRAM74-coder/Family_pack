@@ -789,3 +789,107 @@
 .family-remove-photo-button:hover {
   text-decoration: underline;
 }
+
+
+/* PROFILE PHOTOS */
+
+.dashboard-avatar,
+.family-avatar {
+  overflow: hidden;
+}
+
+.family-profile-photo {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+}
+
+/* MY PROFILE */
+
+.me-member {
+  cursor: pointer;
+}
+
+.me-member:hover .me-avatar {
+  outline: 2px solid #9b76df;
+  outline-offset: 3px;
+}
+
+/* PHOTO UPLOAD SECTION */
+
+.family-photo-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.family-photo-preview {
+  width: 90px;
+  height: 90px;
+  border-radius: 50%;
+  background: #e8dcff;
+  color: #6840a6;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+}
+
+.family-upload-photo-button {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 13px;
+  background: #f0e8ff;
+  color: #6840a6;
+  border: 1px solid #cdb8f2;
+  border-radius: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.family-upload-photo-button:hover {
+  background: #e4d5ff;
+}
+
+.family-upload-photo-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.family-remove-photo-button {
+  background: transparent;
+  border: none;
+  color: #d83c58;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.family-remove-photo-button:hover {
+  text-decoration: underline;
+}
+
+/* LOGGED-IN USER DETAILS */
+
+.family-self-info {
+  width: 100%;
+  padding: 12px 15px;
+  margin-bottom: 20px;
+  border-radius: 12px;
+  background: #f7f3ff;
+  color: #34234d;
+}
+
+.family-self-info p {
+  margin: 5px 0;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
