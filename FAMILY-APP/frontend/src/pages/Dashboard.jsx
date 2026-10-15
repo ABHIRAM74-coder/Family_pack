@@ -57,21 +57,19 @@ const CATEGORIES = [
   { name: "Health", icon: HeartPulse, color: "#d84b72" },
 ];
 
-// Compress a photo before saving it in browser storage.
+// Compress uploaded images for browser storage.
 function processProfilePhoto(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
 
-    reader.onerror = () => {
+    reader.onerror = () =>
       reject(new Error("Unable to read the selected photo."));
-    };
 
     reader.onload = () => {
       const image = new Image();
 
-      image.onerror = () => {
+      image.onerror = () =>
         reject(new Error("Unable to open the selected image."));
-      };
 
       image.onload = () => {
         const canvas = document.createElement("canvas");
@@ -124,6 +122,7 @@ function Dashboard() {
 
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   const [members, setMembers] = useState([]);
   const [myPhoto, setMyPhoto] = useState("");
@@ -140,6 +139,7 @@ function Dashboard() {
   const [activeTab, setActiveTab] = useState("Home");
   const [search, setSearch] = useState("");
   const [error, setError] = useState("");
+  const [logoutError, setLogoutError] = useState("");
 
   const storageKey = user
     ? `family-app-members-${user.id}`
@@ -160,14 +160,12 @@ function Dashboard() {
 
         if (!active) return;
 
-        const registeredName =
-          attributes.name?.trim() ||
-          attributes.given_name?.trim() ||
-          "";
-
         setUser({
           id: currentUser.userId,
-          name: registeredName,
+          name:
+            attributes.name?.trim() ||
+            attributes.given_name?.trim() ||
+            "",
           email: attributes.email || "",
         });
       } catch (err) {
@@ -188,7 +186,7 @@ function Dashboard() {
     };
   }, [navigate]);
 
-  // Load family members saved for this Cognito user.
+  // Load family members.
   useEffect(() => {
     if (!storageKey) return;
 
@@ -203,7 +201,7 @@ function Dashboard() {
     }
   }, [storageKey]);
 
-  // Load logged-in user's own profile photo.
+  // Load own profile photo.
   useEffect(() => {
     if (!myPhotoKey) return;
 
@@ -217,6 +215,7 @@ function Dashboard() {
 
   const closeModal = () => {
     photoRequestRef.current += 1;
+
     setShowAddModal(false);
     setEditingId(null);
     setEditingSelf(false);
@@ -229,6 +228,7 @@ function Dashboard() {
 
   const openAddModal = () => {
     photoRequestRef.current += 1;
+
     setEditingSelf(false);
     setEditingId(null);
     setMemberName("");
@@ -241,6 +241,7 @@ function Dashboard() {
 
   const openEditModal = (member) => {
     photoRequestRef.current += 1;
+
     setEditingSelf(false);
     setEditingId(member.id);
     setMemberName(member.name);
@@ -251,9 +252,9 @@ function Dashboard() {
     setShowAddModal(true);
   };
 
-  // Open the profile editor for "Me".
   const openMyProfile = () => {
     photoRequestRef.current += 1;
+
     setEditingSelf(true);
     setEditingId(null);
     setMemberName(user.name || "");
@@ -264,20 +265,18 @@ function Dashboard() {
     setShowAddModal(true);
   };
 
-  // Upload and process a profile photo.
+  // Upload profile photo.
   const handlePhotoChange = async (event) => {
     const file = event.target.files?.[0];
     event.target.value = "";
 
     if (!file) return;
 
-    const allowedTypes = [
-      "image/jpeg",
-      "image/png",
-      "image/webp",
-    ];
-
-    if (!allowedTypes.includes(file.type)) {
+    if (
+      !["image/jpeg", "image/png", "image/webp"].includes(
+        file.type
+      )
+    ) {
       setError("Please select a JPG, PNG, or WebP image.");
       return;
     }
@@ -293,15 +292,14 @@ function Dashboard() {
     setError("");
 
     try {
-      const processedPhoto = await processProfilePhoto(file);
+      const photo = await processProfilePhoto(file);
 
       if (requestId !== photoRequestRef.current) return;
 
-      setMemberPhoto(processedPhoto);
+      setMemberPhoto(photo);
     } catch (err) {
       if (requestId !== photoRequestRef.current) return;
 
-      console.error("Photo processing error:", err);
       setError(err.message || "Unable to process the photo.");
     } finally {
       if (requestId === photoRequestRef.current) {
@@ -317,13 +315,13 @@ function Dashboard() {
     setError("");
   };
 
-  // Save own photo or add/edit a family member.
+  // Save own photo or family member.
   const handleSaveMember = (event) => {
     event.preventDefault();
     setError("");
 
     if (processingPhoto) {
-      setError("Please wait until the photo finishes processing.");
+      setError("Please wait until photo processing finishes.");
       return;
     }
 
@@ -339,16 +337,13 @@ function Dashboard() {
         setMyPhoto(memberPhoto);
         closeModal();
       } catch (err) {
-        console.error("Unable to save own photo:", err);
-        setError(
-          "Could not save your photo. Browser storage may be full."
-        );
+        console.error("Unable to save profile photo:", err);
+        setError("Unable to save your profile photo.");
       }
 
       return;
     }
 
-    // Save an added family member.
     const name = memberName.trim();
 
     if (!name) {
@@ -401,7 +396,7 @@ function Dashboard() {
     }
   };
 
-  // Delete an added family member.
+  // Delete family member.
   const handleDeleteMember = (id) => {
     if (!window.confirm("Delete this family member?")) {
       return;
@@ -425,13 +420,26 @@ function Dashboard() {
     }
   };
 
+  // Sign out of Cognito and return to Login.
   const handleLogout = async () => {
+    if (loggingOut) return;
+
+    setLoggingOut(true);
+    setLogoutError("");
+
     try {
       await signOut();
+
+      setUser(null);
+      setMembers([]);
+      setMyPhoto("");
+
       navigate("/login", { replace: true });
     } catch (err) {
       console.error("Logout error:", err);
-      setError("Unable to log out. Please try again.");
+      setLogoutError("Unable to log out. Please try again.");
+    } finally {
+      setLoggingOut(false);
     }
   };
 
@@ -558,7 +566,7 @@ function Dashboard() {
               </span>
             </button>
 
-            {/* ADDED FAMILY MEMBERS */}
+            {/* FAMILY MEMBERS */}
             {members.map((member) => (
               <button
                 key={member.id}
@@ -589,7 +597,7 @@ function Dashboard() {
               </button>
             ))}
 
-            {/* ADD MEMBER BUTTON */}
+            {/* ADD MEMBER */}
             <button
               type="button"
               className="family-member family-member-button"
@@ -692,16 +700,22 @@ function Dashboard() {
           </section>
         )}
 
-        {/* LOGOUT */}
-        {activeTab === "Settings" && (
-          <button
-            className="dashboard-logout"
-            onClick={handleLogout}
-          >
-            <LogOut size={20} />
-            Logout
-          </button>
+        {/* LOGOUT BUTTON — ALWAYS VISIBLE */}
+        {logoutError && (
+          <p className="family-form-error" role="alert">
+            {logoutError}
+          </p>
         )}
+
+        <button
+          type="button"
+          className="dashboard-logout"
+          onClick={handleLogout}
+          disabled={loggingOut}
+        >
+          <LogOut size={20} />
+          {loggingOut ? "Logging out..." : "Logout"}
+        </button>
       </main>
 
       {/* BOTTOM NAVIGATION */}
@@ -838,6 +852,7 @@ function Dashboard() {
                 )}
               </div>
 
+              {/* USER OR FAMILY MEMBER DETAILS */}
               {editingSelf ? (
                 <div className="family-self-info">
                   <p>
@@ -896,7 +911,7 @@ function Dashboard() {
               )}
 
               {error && (
-                <p className="family-form-error">
+                <p className="family-form-error" role="alert">
                   {error}
                 </p>
               )}
