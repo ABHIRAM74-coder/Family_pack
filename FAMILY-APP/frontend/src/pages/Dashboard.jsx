@@ -1,5 +1,5 @@
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -29,6 +29,7 @@ import {
   LogOut,
   ChevronRight,
   FileText,
+  Camera,
 } from "lucide-react";
 
 import "./Dashboard.css";
@@ -50,30 +51,74 @@ const RELATIONSHIPS = [
 ];
 
 const CATEGORIES = [
-  {
-    name: "Identity",
-    icon: Fingerprint,
-    color: "#c96d20",
-  },
-  {
-    name: "Finance",
-    icon: Landmark,
-    color: "#1788c6",
-  },
-  {
-    name: "Diary",
-    icon: BookMarked,
-    color: "#b526ba",
-  },
-  {
-    name: "Health",
-    icon: HeartPulse,
-    color: "#d84b72",
-  },
+  { name: "Identity", icon: Fingerprint, color: "#c96d20" },
+  { name: "Finance", icon: Landmark, color: "#1788c6" },
+  { name: "Diary", icon: BookMarked, color: "#b526ba" },
+  { name: "Health", icon: HeartPulse, color: "#d84b72" },
 ];
+
+// Resize uploaded photos to reduce browser storage usage.
+const processProfilePhoto = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onerror = () => {
+      reject(new Error("Unable to read the selected photo."));
+    };
+
+    reader.onload = () => {
+      const image = new Image();
+
+      image.onerror = () => {
+        reject(new Error("The selected image could not be opened."));
+      };
+
+      image.onload = () => {
+        const canvas = document.createElement("canvas");
+        const maxSize = 400;
+
+        const scale = Math.min(
+          1,
+          maxSize / Math.max(image.width, image.height)
+        );
+
+        canvas.width = Math.max(
+          1,
+          Math.round(image.width * scale)
+        );
+
+        canvas.height = Math.max(
+          1,
+          Math.round(image.height * scale)
+        );
+
+        const context = canvas.getContext("2d");
+
+        if (!context) {
+          reject(new Error("Image processing is unavailable."));
+          return;
+        }
+
+        context.drawImage(
+          image,
+          0,
+          0,
+          canvas.width,
+          canvas.height
+        );
+
+        resolve(canvas.toDataURL("image/jpeg", 0.78));
+      };
+
+      image.src = reader.result;
+    };
+
+    reader.readAsDataURL(file);
+  });
 
 function Dashboard() {
   const navigate = useNavigate();
+  const photoInputRef = useRef(null);
 
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -83,17 +128,19 @@ function Dashboard() {
 
   const [memberName, setMemberName] = useState("");
   const [relationship, setRelationship] = useState("");
+  const [memberPhoto, setMemberPhoto] = useState("");
 
   const [editingId, setEditingId] = useState(null);
   const [activeTab, setActiveTab] = useState("Home");
   const [search, setSearch] = useState("");
   const [error, setError] = useState("");
+  const [processingPhoto, setProcessingPhoto] = useState(false);
 
   const storageKey = user
     ? `family-app-members-${user.id}`
     : null;
 
-  // Load the logged-in Cognito user and their registered name.
+  // Load Cognito user.
   useEffect(() => {
     let active = true;
 
@@ -132,7 +179,7 @@ function Dashboard() {
     };
   }, [navigate]);
 
-  // Load family members from browser storage.
+  // Load saved family members.
   useEffect(() => {
     if (!storageKey) return;
 
@@ -152,6 +199,8 @@ function Dashboard() {
     setEditingId(null);
     setMemberName("");
     setRelationship("");
+    setMemberPhoto("");
+    setProcessingPhoto(false);
     setError("");
   };
 
@@ -159,6 +208,8 @@ function Dashboard() {
     setEditingId(null);
     setMemberName("");
     setRelationship("");
+    setMemberPhoto("");
+    setProcessingPhoto(false);
     setError("");
     setShowAddModal(true);
   };
@@ -167,14 +218,58 @@ function Dashboard() {
     setEditingId(member.id);
     setMemberName(member.name);
     setRelationship(member.relationship);
+    setMemberPhoto(member.photo || "");
+    setProcessingPhoto(false);
     setError("");
     setShowAddModal(true);
   };
 
-  // Create or edit a family member.
-  const handleSaveMember = (e) => {
-    e.preventDefault();
+  // Handle photo upload.
+  const handlePhotoChange = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file) return;
+
+    const allowedTypes = [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+    ];
+
+    if (!allowedTypes.includes(file.type)) {
+      setError("Please select a JPG, PNG, or WebP image.");
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setError("Please select an image smaller than 5 MB.");
+      return;
+    }
+
+    setProcessingPhoto(true);
     setError("");
+
+    try {
+      const processedPhoto = await processProfilePhoto(file);
+      setMemberPhoto(processedPhoto);
+    } catch (err) {
+      console.error("Photo upload error:", err);
+      setError(err.message || "Unable to process the photo.");
+    } finally {
+      setProcessingPhoto(false);
+    }
+  };
+
+  // Save or update family member.
+  const handleSaveMember = (event) => {
+    event.preventDefault();
+    setError("");
+
+    if (processingPhoto) {
+      setError("Please wait until the photo finishes processing.");
+      return;
+    }
 
     const name = memberName.trim();
 
@@ -193,7 +288,12 @@ function Dashboard() {
     if (editingId) {
       updatedMembers = members.map((member) =>
         member.id === editingId
-          ? { ...member, name, relationship }
+          ? {
+              ...member,
+              name,
+              relationship,
+              photo: memberPhoto,
+            }
           : member
       );
     } else {
@@ -201,6 +301,7 @@ function Dashboard() {
         id: crypto.randomUUID(),
         name,
         relationship,
+        photo: memberPhoto,
       };
 
       updatedMembers = [...members, newMember];
@@ -216,11 +317,13 @@ function Dashboard() {
       closeModal();
     } catch (err) {
       console.error("Unable to save member:", err);
-      setError("Could not save this member in your browser.");
+      setError(
+        "Could not save this member. Browser storage may be full."
+      );
     }
   };
 
-  // Delete a family member.
+  // Delete family member.
   const handleDeleteMember = (id) => {
     if (!window.confirm("Delete this family member?")) {
       return;
@@ -318,9 +421,7 @@ function Dashboard() {
             className="dashboard-icon-button"
             aria-label="Voice search"
             onClick={() =>
-              window.alert(
-                "Voice search will be added later."
-              )
+              window.alert("Voice search will be added later.")
             }
           >
             <Mic size={25} />
@@ -358,7 +459,7 @@ function Dashboard() {
               </span>
             </div>
 
-            {/* ADDED FAMILY MEMBERS */}
+            {/* FAMILY MEMBERS */}
             {members.map((member) => (
               <button
                 key={member.id}
@@ -367,7 +468,15 @@ function Dashboard() {
                 title={`Edit ${member.name}`}
               >
                 <div className="family-avatar">
-                  <UserRound size={28} />
+                  {member.photo ? (
+                    <img
+                      src={member.photo}
+                      alt={`${member.name}'s profile`}
+                      className="family-profile-photo"
+                    />
+                  ) : (
+                    <UserRound size={28} />
+                  )}
                 </div>
 
                 <span className="family-member-name">
@@ -380,7 +489,7 @@ function Dashboard() {
               </button>
             ))}
 
-            {/* ADD MEMBER BUTTON */}
+            {/* ADD MEMBER */}
             <button
               className="family-member family-member-button"
               onClick={openAddModal}
@@ -420,9 +529,7 @@ function Dashboard() {
                   style={{
                     "--category-color": category.color,
                   }}
-                  onClick={() =>
-                    setActiveTab(category.name)
-                  }
+                  onClick={() => setActiveTab(category.name)}
                 >
                   <CategoryIcon size={26} />
                   <span>{category.name}</span>
@@ -439,9 +546,7 @@ function Dashboard() {
 
             <button
               className="dashboard-text-button"
-              onClick={() =>
-                setActiveTab("Notifications")
-              }
+              onClick={() => setActiveTab("Notifications")}
             >
               See all
             </button>
@@ -460,15 +565,13 @@ function Dashboard() {
               <h3>No reminders yet</h3>
 
               <p>
-                Important document renewals and
-                reminders will appear here.
+                Important document renewals and reminders
+                will appear here.
               </p>
 
               <button
                 className="attention-action"
-                onClick={() =>
-                  setActiveTab("Reminders")
-                }
+                onClick={() => setActiveTab("Reminders")}
               >
                 Manage Reminders
                 <ChevronRight size={18} />
@@ -503,9 +606,7 @@ function Dashboard() {
       {/* BOTTOM NAVIGATION */}
       <nav className="dashboard-bottom-nav">
         <button
-          className={
-            activeTab === "Home" ? "active" : ""
-          }
+          className={activeTab === "Home" ? "active" : ""}
           onClick={() => setActiveTab("Home")}
         >
           <Home size={23} />
@@ -513,9 +614,7 @@ function Dashboard() {
         </button>
 
         <button
-          className={
-            activeTab === "My Family" ? "active" : ""
-          }
+          className={activeTab === "My Family" ? "active" : ""}
           onClick={() => setActiveTab("My Family")}
         >
           <Users size={23} />
@@ -531,9 +630,7 @@ function Dashboard() {
         </button>
 
         <button
-          className={
-            activeTab === "Category" ? "active" : ""
-          }
+          className={activeTab === "Category" ? "active" : ""}
           onClick={() => setActiveTab("Category")}
         >
           <LayoutGrid size={23} />
@@ -541,9 +638,7 @@ function Dashboard() {
         </button>
 
         <button
-          className={
-            activeTab === "Settings" ? "active" : ""
-          }
+          className={activeTab === "Settings" ? "active" : ""}
           onClick={() => setActiveTab("Settings")}
         >
           <Settings size={23} />
@@ -551,7 +646,7 @@ function Dashboard() {
         </button>
       </nav>
 
-      {/* ADD / EDIT MEMBER FORM */}
+      {/* ADD / EDIT MEMBER MODAL */}
       {showAddModal && (
         <div
           className="family-modal-overlay"
@@ -581,6 +676,58 @@ function Dashboard() {
             </div>
 
             <form onSubmit={handleSaveMember}>
+
+              {/* PROFILE PHOTO */}
+              <div className="family-photo-section">
+                <div className="family-photo-preview">
+                  {memberPhoto ? (
+                    <img
+                      src={memberPhoto}
+                      alt="Profile preview"
+                      className="family-profile-photo"
+                    />
+                  ) : (
+                    <UserRound size={38} />
+                  )}
+                </div>
+
+                <input
+                  ref={photoInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={handlePhotoChange}
+                  style={{ display: "none" }}
+                  aria-label="Select profile photo"
+                />
+
+                <button
+                  type="button"
+                  className="family-upload-photo-button"
+                  disabled={processingPhoto}
+                  onClick={() =>
+                    photoInputRef.current?.click()
+                  }
+                >
+                  <Camera size={19} />
+
+                  {processingPhoto
+                    ? "Processing Photo..."
+                    : memberPhoto
+                    ? "Change Profile Photo"
+                    : "Upload Profile Photo"}
+                </button>
+
+                {memberPhoto && (
+                  <button
+                    type="button"
+                    className="family-remove-photo-button"
+                    onClick={() => setMemberPhoto("")}
+                  >
+                    Remove Photo
+                  </button>
+                )}
+              </div>
+
               <label htmlFor="member-name">
                 Full Name
               </label>
@@ -590,9 +737,7 @@ function Dashboard() {
                 type="text"
                 placeholder="Enter family member's name"
                 value={memberName}
-                onChange={(e) =>
-                  setMemberName(e.target.value)
-                }
+                onChange={(e) => setMemberName(e.target.value)}
                 maxLength={100}
                 required
               />
@@ -614,10 +759,7 @@ function Dashboard() {
                 </option>
 
                 {RELATIONSHIPS.map((relation) => (
-                  <option
-                    key={relation}
-                    value={relation}
-                  >
+                  <option key={relation} value={relation}>
                     {relation}
                   </option>
                 ))}
@@ -632,6 +774,7 @@ function Dashboard() {
               <button
                 type="submit"
                 className="family-save-button"
+                disabled={processingPhoto}
               >
                 {editingId
                   ? "Save Changes"
