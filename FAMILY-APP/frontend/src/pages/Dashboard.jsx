@@ -35,7 +35,6 @@ import {
 
 import "./Dashboard.css";
 
-// AWS API Gateway
 const API_URL =
   "https://df9aajz1zf.execute-api.ap-southeast-2.amazonaws.com";
 
@@ -62,10 +61,8 @@ const CATEGORIES = [
   { name: "Health", icon: HeartPulse, color: "#d84b72" },
 ];
 
-// Get Cognito ID token for authenticated API requests
 async function getAuthToken() {
   const session = await fetchAuthSession();
-
   const token = session.tokens?.idToken?.toString();
 
   if (!token) {
@@ -77,7 +74,6 @@ async function getAuthToken() {
   return token;
 }
 
-// Make an authenticated request to API Gateway
 async function apiRequest(method, path, body) {
   const token = await getAuthToken();
 
@@ -104,19 +100,22 @@ async function apiRequest(method, path, body) {
   return result;
 }
 
-// Compress photos for local browser storage
+// Compress selected images to JPEG.
+// This keeps profile photos small and consistent.
 function processProfilePhoto(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
 
-    reader.onerror = () =>
+    reader.onerror = () => {
       reject(new Error("Unable to read the selected photo."));
+    };
 
     reader.onload = () => {
       const image = new Image();
 
-      image.onerror = () =>
+      image.onerror = () => {
         reject(new Error("Unable to open the selected image."));
+      };
 
       image.onload = () => {
         const canvas = document.createElement("canvas");
@@ -140,9 +139,20 @@ function processProfilePhoto(file) {
         const context = canvas.getContext("2d");
 
         if (!context) {
-          reject(new Error("Image processing is unavailable."));
+          reject(
+            new Error("Image processing is unavailable.")
+          );
           return;
         }
+
+        // White background for transparent PNG/WebP images.
+        context.fillStyle = "#ffffff";
+        context.fillRect(
+          0,
+          0,
+          canvas.width,
+          canvas.height
+        );
 
         context.drawImage(
           image,
@@ -162,11 +172,95 @@ function processProfilePhoto(file) {
   });
 }
 
+// Convert compressed data URL into a JPEG Blob.
+function dataUrlToBlob(dataUrl) {
+  const [header, encoded] = dataUrl.split(",");
+
+  if (
+    !header?.startsWith("data:image/jpeg;base64") ||
+    !encoded
+  ) {
+    throw new Error("Invalid profile photo data.");
+  }
+
+  const binary = atob(encoded);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+
+  return new Blob([bytes], {
+    type: "image/jpeg",
+  });
+}
+
+// Request a temporary S3 upload URL from Lambda,
+// then upload the image directly to the private bucket.
+async function uploadPhotoToS3(memberId, photoDataUrl) {
+  const { uploadUrl } = await apiRequest(
+    "POST",
+    "/photos/upload-url",
+    {
+      memberId,
+      contentType: "image/jpeg",
+    }
+  );
+
+  if (!uploadUrl) {
+    throw new Error("AWS did not return a photo upload URL.");
+  }
+
+  const blob = dataUrlToBlob(photoDataUrl);
+
+  const response = await fetch(uploadUrl, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "image/jpeg",
+    },
+    body: blob,
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `S3 photo upload failed (${response.status}).`
+    );
+  }
+}
+
+// Retrieve a temporary URL for a stored photo.
+async function getPhotoUrl(memberId) {
+  try {
+    const result = await apiRequest(
+      "GET",
+      `/photos/view-url?memberId=${encodeURIComponent(
+        memberId
+      )}`
+    );
+
+    return result.viewUrl || "";
+  } catch (error) {
+    if (error.message === "Photo not found") {
+      return "";
+    }
+
+    throw error;
+  }
+}
+
+// Delete the stored S3 photo.
+async function deletePhotoFromS3(memberId) {
+  await apiRequest("DELETE", "/photos", {
+    memberId,
+  });
+}
+
 function Dashboard() {
   const navigate = useNavigate();
 
   const photoInputRef = useRef(null);
   const photoRequestRef = useRef(0);
+  const photoVersionRef = useRef(0);
 
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -186,8 +280,12 @@ function Dashboard() {
   const [relationship, setRelationship] = useState("");
   const [memberPhoto, setMemberPhoto] = useState("");
 
+  // True when the user has selected or removed a photo.
+  const [photoChanged, setPhotoChanged] = useState(false);
+
   const [processingPhoto, setProcessingPhoto] =
     useState(false);
+
   const [saving, setSaving] = useState(false);
 
   const [activeTab, setActiveTab] = useState("Home");
@@ -195,6 +293,11 @@ function Dashboard() {
   const [error, setError] = useState("");
   const [logoutError, setLogoutError] = useState("");
 
+  // Refresh temporary S3 URLs before their 5-minute expiry.
+  const [photoRefresh, setPhotoRefresh] = useState(0);
+
+  // Existing browser photo keys are retained only
+  // for compatibility with older local profile photos.
   const myPhotoKey = user
     ? `family-app-profile-photo-${user.id}`
     : null;
@@ -203,7 +306,6 @@ function Dashboard() {
     ? `family-app-member-photos-${user.id}`
     : null;
 
-  // Store member photos locally until S3 is configured
   const getMemberPhotos = () => {
     if (!memberPhotosKey) return {};
 
@@ -216,22 +318,7 @@ function Dashboard() {
     }
   };
 
-  const saveMemberPhoto = (memberId, photo) => {
-    const photos = getMemberPhotos();
-
-    if (photo) {
-      photos[memberId] = photo;
-    } else {
-      delete photos[memberId];
-    }
-
-    localStorage.setItem(
-      memberPhotosKey,
-      JSON.stringify(photos)
-    );
-  };
-
-  // Load Cognito user
+  // Load authenticated Cognito user.
   useEffect(() => {
     let active = true;
 
@@ -270,11 +357,24 @@ function Dashboard() {
     };
   }, [navigate]);
 
-  // Load family members from DynamoDB through Lambda
+  // Periodically refresh signed S3 image URLs.
+  useEffect(() => {
+    if (!user) return;
+
+    const interval = setInterval(() => {
+      setPhotoRefresh((value) => value + 1);
+    }, 4 * 60 * 1000);
+
+    return () => clearInterval(interval);
+  }, [user?.id]);
+
+  // Load family members from DynamoDB and their photos
+  // from private S3 storage.
   useEffect(() => {
     if (!user) return;
 
     let active = true;
+    const version = ++photoVersionRef.current;
 
     async function loadMembers() {
       setLoadingMembers(true);
@@ -288,17 +388,58 @@ function Dashboard() {
 
         if (!active) return;
 
-        const photos = getMemberPhotos();
+        const storedPhotos = getMemberPhotos();
 
         const loadedMembers = Array.isArray(result.members)
           ? result.members.map((member) => ({
               ...member,
               id: member.memberId,
-              photo: photos[member.memberId] || "",
+              photo:
+                storedPhotos[member.memberId] || "",
             }))
           : [];
 
         setMembers(loadedMembers);
+
+        // Load all family photos without blocking the list.
+        const photoResults = await Promise.allSettled(
+          loadedMembers.map(async (member) => ({
+            id: member.id,
+            url: await getPhotoUrl(member.id),
+          }))
+        );
+
+        if (
+          !active ||
+          version !== photoVersionRef.current
+        ) {
+          return;
+        }
+
+        const photoMap = {};
+
+        photoResults.forEach((result) => {
+          if (result.status === "fulfilled") {
+            photoMap[result.value.id] = result.value.url;
+          } else {
+            console.error(
+              "Unable to retrieve family photo:",
+              result.reason
+            );
+          }
+        });
+
+        setMembers((previous) =>
+          previous.map((member) => ({
+            ...member,
+            photo:
+              photoMap[member.id] !== undefined
+                ? photoMap[member.id] ||
+                  storedPhotos[member.id] ||
+                  ""
+                : member.photo,
+          }))
+        );
       } catch (err) {
         console.error("Unable to load members:", err);
 
@@ -319,21 +460,47 @@ function Dashboard() {
     return () => {
       active = false;
     };
-  }, [user?.id]);
+  }, [user?.id, photoRefresh]);
 
-  // Load own profile photo
+  // Load the logged-in user's own photo from S3.
   useEffect(() => {
-    if (!myPhotoKey) return;
+    if (!user) return;
 
-    try {
-      setMyPhoto(
-        localStorage.getItem(myPhotoKey) || ""
-      );
-    } catch (err) {
-      console.error("Unable to load profile photo:", err);
-      setMyPhoto("");
+    let active = true;
+
+    async function loadMyPhoto() {
+      // Existing local photo is a temporary fallback.
+      let fallback = "";
+
+      try {
+        fallback = myPhotoKey
+          ? localStorage.getItem(myPhotoKey) || ""
+          : "";
+      } catch {
+        fallback = "";
+      }
+
+      try {
+        const url = await getPhotoUrl("me");
+
+        if (active) {
+          setMyPhoto(url || fallback);
+        }
+      } catch (err) {
+        console.error("Unable to load my photo:", err);
+
+        if (active) {
+          setMyPhoto(fallback);
+        }
+      }
     }
-  }, [myPhotoKey]);
+
+    loadMyPhoto();
+
+    return () => {
+      active = false;
+    };
+  }, [user?.id, photoRefresh, myPhotoKey]);
 
   const closeModal = () => {
     photoRequestRef.current += 1;
@@ -344,6 +511,7 @@ function Dashboard() {
     setMemberName("");
     setRelationship("");
     setMemberPhoto("");
+    setPhotoChanged(false);
     setProcessingPhoto(false);
     setSaving(false);
     setError("");
@@ -357,6 +525,7 @@ function Dashboard() {
     setMemberName("");
     setRelationship("");
     setMemberPhoto("");
+    setPhotoChanged(false);
     setProcessingPhoto(false);
     setError("");
     setShowAddModal(true);
@@ -370,6 +539,7 @@ function Dashboard() {
     setMemberName(member.name);
     setRelationship(member.relationship);
     setMemberPhoto(member.photo || "");
+    setPhotoChanged(false);
     setProcessingPhoto(false);
     setError("");
     setShowAddModal(true);
@@ -383,12 +553,13 @@ function Dashboard() {
     setMemberName(user.name || "");
     setRelationship("");
     setMemberPhoto(myPhoto);
+    setPhotoChanged(false);
     setProcessingPhoto(false);
     setError("");
     setShowAddModal(true);
   };
 
-  // Upload and process profile photo
+  // Select a new photo.
   const handlePhotoChange = async (event) => {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -417,11 +588,16 @@ function Dashboard() {
     try {
       const photo = await processProfilePhoto(file);
 
-      if (requestId !== photoRequestRef.current) return;
+      if (requestId !== photoRequestRef.current) {
+        return;
+      }
 
       setMemberPhoto(photo);
+      setPhotoChanged(true);
     } catch (err) {
-      if (requestId !== photoRequestRef.current) return;
+      if (requestId !== photoRequestRef.current) {
+        return;
+      }
 
       setError(
         err.message || "Unable to process the photo."
@@ -433,36 +609,76 @@ function Dashboard() {
     }
   };
 
+  // Mark the photo for deletion.
   const handleRemovePhoto = () => {
     photoRequestRef.current += 1;
     setProcessingPhoto(false);
     setMemberPhoto("");
+    setPhotoChanged(true);
     setError("");
   };
 
-  // Save profile or family member
+  // Save an uploaded photo or remove the previous one.
+  async function savePhotoChange(memberId) {
+    if (!photoChanged) {
+      return null;
+    }
+
+    if (memberPhoto) {
+      await uploadPhotoToS3(memberId, memberPhoto);
+
+      // Get a new signed URL after successful upload.
+      const updatedUrl = await getPhotoUrl(memberId);
+
+      if (!updatedUrl) {
+        throw new Error(
+          "Photo uploaded, but AWS could not retrieve it."
+        );
+      }
+
+      return updatedUrl;
+    }
+
+    await deletePhotoFromS3(memberId);
+    return "";
+  }
+
+  // Save user profile or family member.
   const handleSaveMember = async (event) => {
     event.preventDefault();
     setError("");
 
-    if (processingPhoto || saving) {
-      return;
-    }
+    if (processingPhoto || saving) return;
 
-    // Save logged-in user's own photo
+    // Update the logged-in user's own photo.
     if (editingSelf) {
+      setSaving(true);
+
       try {
-        if (memberPhoto) {
-          localStorage.setItem(myPhotoKey, memberPhoto);
-        } else {
-          localStorage.removeItem(myPhotoKey);
+        const result = await savePhotoChange("me");
+
+        if (result !== null) {
+          setMyPhoto(result);
+
+          // Remove outdated local copy once AWS succeeds.
+          if (myPhotoKey) {
+            try {
+              localStorage.removeItem(myPhotoKey);
+            } catch {
+              // AWS copy is still saved.
+            }
+          }
         }
 
-        setMyPhoto(memberPhoto);
         closeModal();
       } catch (err) {
-        console.error("Profile photo error:", err);
-        setError("Unable to save your profile photo.");
+        console.error("Unable to save my photo:", err);
+
+        setError(
+          err.message || "Unable to save your profile photo."
+        );
+      } finally {
+        setSaving(false);
       }
 
       return;
@@ -480,9 +696,7 @@ function Dashboard() {
       return;
     }
 
-    // Existing Lambda does not yet support PUT.
-    // Preserve editing interface, but do not pretend
-    // that name changes have been saved to DynamoDB.
+    // Edit an existing family member's photo.
     if (editingId) {
       const existing = members.find(
         (member) => member.id === editingId
@@ -493,6 +707,7 @@ function Dashboard() {
         return;
       }
 
+      // The current Lambda doesn't support PUT /members.
       if (
         name !== existing.name ||
         relationship !== existing.relationship
@@ -503,28 +718,58 @@ function Dashboard() {
         return;
       }
 
-      try {
-        saveMemberPhoto(editingId, memberPhoto);
+      setSaving(true);
 
-        setMembers((previous) =>
-          previous.map((member) =>
-            member.id === editingId
-              ? { ...member, photo: memberPhoto }
-              : member
-          )
-        );
+      try {
+        const result = await savePhotoChange(editingId);
+
+        if (result !== null) {
+          // Prevent an older photo-loading request
+          // from replacing the new photo.
+          photoVersionRef.current += 1;
+
+          setMembers((previous) =>
+            previous.map((member) =>
+              member.id === editingId
+                ? { ...member, photo: result }
+                : member
+            )
+          );
+
+          // Remove old browser-stored photo.
+          if (memberPhotosKey) {
+            try {
+              const photos = getMemberPhotos();
+              delete photos[editingId];
+
+              localStorage.setItem(
+                memberPhotosKey,
+                JSON.stringify(photos)
+              );
+            } catch {
+              // AWS photo is already saved.
+            }
+          }
+        }
 
         closeModal();
       } catch (err) {
-        console.error("Unable to save photo:", err);
-        setError("Unable to save the profile photo.");
+        console.error("Unable to update photo:", err);
+
+        setError(
+          err.message || "Unable to update the profile photo."
+        );
+      } finally {
+        setSaving(false);
       }
 
       return;
     }
 
-    // Create family member in DynamoDB
+    // Create a new family member in DynamoDB.
     setSaving(true);
+
+    let createdMember = null;
 
     try {
       const result = await apiRequest(
@@ -536,58 +781,72 @@ function Dashboard() {
         }
       );
 
-      const created = result.member;
+      createdMember = result.member;
 
-      if (!created?.memberId) {
+      if (!createdMember?.memberId) {
         throw new Error(
           "The server did not return a member ID."
         );
       }
 
-      if (memberPhoto) {
-        try {
-          saveMemberPhoto(
-            created.memberId,
-            memberPhoto
-          );
-        } catch (photoError) {
-          console.warn(
-            "Member saved, but photo was not stored:",
-            photoError
-          );
-        }
-      }
-
+      // Add the new member immediately after DynamoDB saves.
       setMembers((previous) => [
         ...previous,
         {
-          ...created,
-          id: created.memberId,
-          photo: memberPhoto,
+          ...createdMember,
+          id: createdMember.memberId,
+          photo: "",
         },
       ]);
+
+      // If a photo was selected, upload it to S3.
+      if (photoChanged && memberPhoto) {
+        const photoUrl = await savePhotoChange(
+          createdMember.memberId
+        );
+
+        photoVersionRef.current += 1;
+
+        setMembers((previous) =>
+          previous.map((member) =>
+            member.id === createdMember.memberId
+              ? {
+                  ...member,
+                  photo: photoUrl || "",
+                }
+              : member
+          )
+        );
+      }
 
       closeModal();
     } catch (err) {
       console.error("Unable to create member:", err);
 
-      setError(
-        err.message || "Unable to save family member."
-      );
+      if (createdMember?.memberId) {
+        setError(
+          "Family member was saved in DynamoDB, but the photo could not be uploaded. Close this window, open the new member, and try uploading the photo again. " +
+            (err.message || "")
+        );
+      } else {
+        setError(
+          err.message || "Unable to save family member."
+        );
+      }
     } finally {
       setSaving(false);
     }
   };
 
-  // Delete will be connected to DynamoDB
-  // when the DELETE API route is implemented
+  // Family member deletion still needs
+  // a separate DynamoDB DELETE /members endpoint.
   const handleDeleteMember = () => {
     setError(
       "Deleting family members requires the AWS DELETE endpoint. We will add that next."
     );
   };
 
-  // Cognito logout
+  // Cognito logout.
   const handleLogout = async () => {
     if (loggingOut) return;
 
