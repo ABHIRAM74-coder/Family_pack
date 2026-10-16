@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import {
   getCurrentUser,
   fetchUserAttributes,
+  fetchAuthSession,
   signOut,
 } from "aws-amplify/auth";
 
@@ -34,6 +35,10 @@ import {
 
 import "./Dashboard.css";
 
+// AWS API Gateway
+const API_URL =
+  "https://df9aajz1zf.execute-api.ap-southeast-2.amazonaws.com";
+
 const RELATIONSHIPS = [
   "Mother",
   "Father",
@@ -57,7 +62,49 @@ const CATEGORIES = [
   { name: "Health", icon: HeartPulse, color: "#d84b72" },
 ];
 
-// Compress uploaded images for browser storage.
+// Get Cognito ID token for authenticated API requests
+async function getAuthToken() {
+  const session = await fetchAuthSession();
+
+  const token = session.tokens?.idToken?.toString();
+
+  if (!token) {
+    throw new Error(
+      "Your login session is unavailable. Please log in again."
+    );
+  }
+
+  return token;
+}
+
+// Make an authenticated request to API Gateway
+async function apiRequest(method, path, body) {
+  const token = await getAuthToken();
+
+  const response = await fetch(`${API_URL}${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    ...(body !== undefined
+      ? { body: JSON.stringify(body) }
+      : {}),
+  });
+
+  const result = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(
+      result.message ||
+        `API request failed with status ${response.status}`
+    );
+  }
+
+  return result;
+}
+
+// Compress photos for local browser storage
 function processProfilePhoto(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -117,6 +164,7 @@ function processProfilePhoto(file) {
 
 function Dashboard() {
   const navigate = useNavigate();
+
   const photoInputRef = useRef(null);
   const photoRequestRef = useRef(0);
 
@@ -125,6 +173,9 @@ function Dashboard() {
   const [loggingOut, setLoggingOut] = useState(false);
 
   const [members, setMembers] = useState([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+  const [membersError, setMembersError] = useState("");
+
   const [myPhoto, setMyPhoto] = useState("");
 
   const [showAddModal, setShowAddModal] = useState(false);
@@ -134,22 +185,53 @@ function Dashboard() {
   const [memberName, setMemberName] = useState("");
   const [relationship, setRelationship] = useState("");
   const [memberPhoto, setMemberPhoto] = useState("");
-  const [processingPhoto, setProcessingPhoto] = useState(false);
+
+  const [processingPhoto, setProcessingPhoto] =
+    useState(false);
+  const [saving, setSaving] = useState(false);
 
   const [activeTab, setActiveTab] = useState("Home");
   const [search, setSearch] = useState("");
   const [error, setError] = useState("");
   const [logoutError, setLogoutError] = useState("");
 
-  const storageKey = user
-    ? `family-app-members-${user.id}`
-    : null;
-
   const myPhotoKey = user
     ? `family-app-profile-photo-${user.id}`
     : null;
 
-  // Load authenticated Cognito user.
+  const memberPhotosKey = user
+    ? `family-app-member-photos-${user.id}`
+    : null;
+
+  // Store member photos locally until S3 is configured
+  const getMemberPhotos = () => {
+    if (!memberPhotosKey) return {};
+
+    try {
+      return JSON.parse(
+        localStorage.getItem(memberPhotosKey) || "{}"
+      );
+    } catch {
+      return {};
+    }
+  };
+
+  const saveMemberPhoto = (memberId, photo) => {
+    const photos = getMemberPhotos();
+
+    if (photo) {
+      photos[memberId] = photo;
+    } else {
+      delete photos[memberId];
+    }
+
+    localStorage.setItem(
+      memberPhotosKey,
+      JSON.stringify(photos)
+    );
+  };
+
+  // Load Cognito user
   useEffect(() => {
     let active = true;
 
@@ -175,7 +257,9 @@ function Dashboard() {
           navigate("/login", { replace: true });
         }
       } finally {
-        if (active) setLoading(false);
+        if (active) {
+          setLoading(false);
+        }
       }
     }
 
@@ -186,27 +270,65 @@ function Dashboard() {
     };
   }, [navigate]);
 
-  // Load family members.
+  // Load family members from DynamoDB through Lambda
   useEffect(() => {
-    if (!storageKey) return;
+    if (!user) return;
 
-    try {
-      const saved = localStorage.getItem(storageKey);
-      const parsed = saved ? JSON.parse(saved) : [];
+    let active = true;
 
-      setMembers(Array.isArray(parsed) ? parsed : []);
-    } catch (err) {
-      console.error("Unable to load family members:", err);
-      setMembers([]);
+    async function loadMembers() {
+      setLoadingMembers(true);
+      setMembersError("");
+
+      try {
+        const result = await apiRequest(
+          "GET",
+          "/members"
+        );
+
+        if (!active) return;
+
+        const photos = getMemberPhotos();
+
+        const loadedMembers = Array.isArray(result.members)
+          ? result.members.map((member) => ({
+              ...member,
+              id: member.memberId,
+              photo: photos[member.memberId] || "",
+            }))
+          : [];
+
+        setMembers(loadedMembers);
+      } catch (err) {
+        console.error("Unable to load members:", err);
+
+        if (active) {
+          setMembersError(
+            err.message || "Unable to load family members."
+          );
+        }
+      } finally {
+        if (active) {
+          setLoadingMembers(false);
+        }
+      }
     }
-  }, [storageKey]);
 
-  // Load own profile photo.
+    loadMembers();
+
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
+
+  // Load own profile photo
   useEffect(() => {
     if (!myPhotoKey) return;
 
     try {
-      setMyPhoto(localStorage.getItem(myPhotoKey) || "");
+      setMyPhoto(
+        localStorage.getItem(myPhotoKey) || ""
+      );
     } catch (err) {
       console.error("Unable to load profile photo:", err);
       setMyPhoto("");
@@ -223,6 +345,7 @@ function Dashboard() {
     setRelationship("");
     setMemberPhoto("");
     setProcessingPhoto(false);
+    setSaving(false);
     setError("");
   };
 
@@ -265,7 +388,7 @@ function Dashboard() {
     setShowAddModal(true);
   };
 
-  // Upload profile photo.
+  // Upload and process profile photo
   const handlePhotoChange = async (event) => {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -300,7 +423,9 @@ function Dashboard() {
     } catch (err) {
       if (requestId !== photoRequestRef.current) return;
 
-      setError(err.message || "Unable to process the photo.");
+      setError(
+        err.message || "Unable to process the photo."
+      );
     } finally {
       if (requestId === photoRequestRef.current) {
         setProcessingPhoto(false);
@@ -315,17 +440,16 @@ function Dashboard() {
     setError("");
   };
 
-  // Save own photo or family member.
-  const handleSaveMember = (event) => {
+  // Save profile or family member
+  const handleSaveMember = async (event) => {
     event.preventDefault();
     setError("");
 
-    if (processingPhoto) {
-      setError("Please wait until photo processing finishes.");
+    if (processingPhoto || saving) {
       return;
     }
 
-    // Save logged-in user's own photo.
+    // Save logged-in user's own photo
     if (editingSelf) {
       try {
         if (memberPhoto) {
@@ -337,7 +461,7 @@ function Dashboard() {
         setMyPhoto(memberPhoto);
         closeModal();
       } catch (err) {
-        console.error("Unable to save profile photo:", err);
+        console.error("Profile photo error:", err);
         setError("Unable to save your profile photo.");
       }
 
@@ -356,71 +480,114 @@ function Dashboard() {
       return;
     }
 
-    let updatedMembers;
-
+    // Existing Lambda does not yet support PUT.
+    // Preserve editing interface, but do not pretend
+    // that name changes have been saved to DynamoDB.
     if (editingId) {
-      updatedMembers = members.map((member) =>
-        member.id === editingId
-          ? {
-              ...member,
-              name,
-              relationship,
-              photo: memberPhoto,
-            }
-          : member
-      );
-    } else {
-      const newMember = {
-        id: crypto.randomUUID(),
-        name,
-        relationship,
-        photo: memberPhoto,
-      };
-
-      updatedMembers = [...members, newMember];
-    }
-
-    try {
-      localStorage.setItem(
-        storageKey,
-        JSON.stringify(updatedMembers)
+      const existing = members.find(
+        (member) => member.id === editingId
       );
 
-      setMembers(updatedMembers);
-      closeModal();
-    } catch (err) {
-      console.error("Unable to save family member:", err);
-      setError(
-        "Could not save this member. Browser storage may be full."
-      );
-    }
-  };
+      if (!existing) {
+        setError("Family member not found.");
+        return;
+      }
 
-  // Delete family member.
-  const handleDeleteMember = (id) => {
-    if (!window.confirm("Delete this family member?")) {
+      if (
+        name !== existing.name ||
+        relationship !== existing.relationship
+      ) {
+        setError(
+          "Saving name or relationship changes requires the AWS update endpoint. We will add that next."
+        );
+        return;
+      }
+
+      try {
+        saveMemberPhoto(editingId, memberPhoto);
+
+        setMembers((previous) =>
+          previous.map((member) =>
+            member.id === editingId
+              ? { ...member, photo: memberPhoto }
+              : member
+          )
+        );
+
+        closeModal();
+      } catch (err) {
+        console.error("Unable to save photo:", err);
+        setError("Unable to save the profile photo.");
+      }
+
       return;
     }
 
-    const updatedMembers = members.filter(
-      (member) => member.id !== id
-    );
+    // Create family member in DynamoDB
+    setSaving(true);
 
     try {
-      localStorage.setItem(
-        storageKey,
-        JSON.stringify(updatedMembers)
+      const result = await apiRequest(
+        "POST",
+        "/members",
+        {
+          name,
+          relationship,
+        }
       );
 
-      setMembers(updatedMembers);
+      const created = result.member;
+
+      if (!created?.memberId) {
+        throw new Error(
+          "The server did not return a member ID."
+        );
+      }
+
+      if (memberPhoto) {
+        try {
+          saveMemberPhoto(
+            created.memberId,
+            memberPhoto
+          );
+        } catch (photoError) {
+          console.warn(
+            "Member saved, but photo was not stored:",
+            photoError
+          );
+        }
+      }
+
+      setMembers((previous) => [
+        ...previous,
+        {
+          ...created,
+          id: created.memberId,
+          photo: memberPhoto,
+        },
+      ]);
+
       closeModal();
     } catch (err) {
-      console.error("Unable to delete family member:", err);
-      setError("Could not delete this family member.");
+      console.error("Unable to create member:", err);
+
+      setError(
+        err.message || "Unable to save family member."
+      );
+    } finally {
+      setSaving(false);
     }
   };
 
-  // Sign out of Cognito and return to Login.
+  // Delete will be connected to DynamoDB
+  // when the DELETE API route is implemented
+  const handleDeleteMember = () => {
+    setError(
+      "Deleting family members requires the AWS DELETE endpoint. We will add that next."
+    );
+  };
+
+  // Cognito logout
   const handleLogout = async () => {
     if (loggingOut) return;
 
@@ -437,7 +604,10 @@ function Dashboard() {
       navigate("/login", { replace: true });
     } catch (err) {
       console.error("Logout error:", err);
-      setLogoutError("Unable to log out. Please try again.");
+
+      setLogoutError(
+        "Unable to log out. Please try again."
+      );
     } finally {
       setLoggingOut(false);
     }
@@ -492,7 +662,9 @@ function Dashboard() {
             <button
               className="dashboard-circle-button"
               aria-label="Notifications"
-              onClick={() => setActiveTab("Notifications")}
+              onClick={() =>
+                setActiveTab("Notifications")
+              }
             >
               <Bell size={25} />
             </button>
@@ -507,7 +679,9 @@ function Dashboard() {
             type="search"
             placeholder='Search "Wife Aadhaar Card"'
             value={search}
-            onChange={(event) => setSearch(event.target.value)}
+            onChange={(event) =>
+              setSearch(event.target.value)
+            }
             aria-label="Search documents"
           />
 
@@ -515,7 +689,9 @@ function Dashboard() {
             className="dashboard-icon-button"
             aria-label="Voice search"
             onClick={() =>
-              window.alert("Voice search will be added later.")
+              window.alert(
+                "Voice search will be added later."
+              )
             }
           >
             <Mic size={25} />
@@ -535,6 +711,19 @@ function Dashboard() {
               <Pencil size={24} />
             </button>
           </div>
+
+          {loadingMembers && (
+            <p>Loading family members...</p>
+          )}
+
+          {membersError && (
+            <p
+              className="family-form-error"
+              role="alert"
+            >
+              {membersError}
+            </p>
+          )}
 
           <div className="family-card">
 
@@ -638,7 +827,9 @@ function Dashboard() {
                   style={{
                     "--category-color": category.color,
                   }}
-                  onClick={() => setActiveTab(category.name)}
+                  onClick={() =>
+                    setActiveTab(category.name)
+                  }
                 >
                   <CategoryIcon size={26} />
                   <span>{category.name}</span>
@@ -655,7 +846,9 @@ function Dashboard() {
 
             <button
               className="dashboard-text-button"
-              onClick={() => setActiveTab("Notifications")}
+              onClick={() =>
+                setActiveTab("Notifications")
+              }
             >
               See all
             </button>
@@ -680,7 +873,9 @@ function Dashboard() {
 
               <button
                 className="attention-action"
-                onClick={() => setActiveTab("Reminders")}
+                onClick={() =>
+                  setActiveTab("Reminders")
+                }
               >
                 Manage Reminders
                 <ChevronRight size={18} />
@@ -700,9 +895,12 @@ function Dashboard() {
           </section>
         )}
 
-        {/* LOGOUT BUTTON — ALWAYS VISIBLE */}
+        {/* LOGOUT */}
         {logoutError && (
-          <p className="family-form-error" role="alert">
+          <p
+            className="family-form-error"
+            role="alert"
+          >
             {logoutError}
           </p>
         )}
@@ -714,14 +912,18 @@ function Dashboard() {
           disabled={loggingOut}
         >
           <LogOut size={20} />
-          {loggingOut ? "Logging out..." : "Logout"}
+          {loggingOut
+            ? "Logging out..."
+            : "Logout"}
         </button>
       </main>
 
       {/* BOTTOM NAVIGATION */}
       <nav className="dashboard-bottom-nav">
         <button
-          className={activeTab === "Home" ? "active" : ""}
+          className={
+            activeTab === "Home" ? "active" : ""
+          }
           onClick={() => setActiveTab("Home")}
         >
           <Home size={23} />
@@ -732,7 +934,9 @@ function Dashboard() {
           className={
             activeTab === "My Family" ? "active" : ""
           }
-          onClick={() => setActiveTab("My Family")}
+          onClick={() =>
+            setActiveTab("My Family")
+          }
         >
           <Users size={23} />
           <span>My Family</span>
@@ -750,7 +954,9 @@ function Dashboard() {
           className={
             activeTab === "Category" ? "active" : ""
           }
-          onClick={() => setActiveTab("Category")}
+          onClick={() =>
+            setActiveTab("Category")
+          }
         >
           <LayoutGrid size={23} />
           <span>Category</span>
@@ -760,7 +966,9 @@ function Dashboard() {
           className={
             activeTab === "Settings" ? "active" : ""
           }
-          onClick={() => setActiveTab("Settings")}
+          onClick={() =>
+            setActiveTab("Settings")
+          }
         >
           <Settings size={23} />
           <span>Settings</span>
@@ -771,14 +979,18 @@ function Dashboard() {
       {showAddModal && (
         <div
           className="family-modal-overlay"
-          onClick={closeModal}
+          onClick={() => {
+            if (!saving) closeModal();
+          }}
         >
           <div
             className="family-modal"
             role="dialog"
             aria-modal="true"
             aria-labelledby="family-modal-title"
-            onClick={(event) => event.stopPropagation()}
+            onClick={(event) =>
+              event.stopPropagation()
+            }
           >
             <div className="family-modal-header">
               <h2 id="family-modal-title">
@@ -793,6 +1005,7 @@ function Dashboard() {
                 type="button"
                 className="dashboard-icon-button"
                 onClick={closeModal}
+                disabled={saving}
                 aria-label="Close"
               >
                 <X size={23} />
@@ -827,7 +1040,9 @@ function Dashboard() {
                 <button
                   type="button"
                   className="family-upload-photo-button"
-                  disabled={processingPhoto}
+                  disabled={
+                    processingPhoto || saving
+                  }
                   onClick={() =>
                     photoInputRef.current?.click()
                   }
@@ -846,13 +1061,14 @@ function Dashboard() {
                     type="button"
                     className="family-remove-photo-button"
                     onClick={handleRemovePhoto}
+                    disabled={saving}
                   >
                     Remove Photo
                   </button>
                 )}
               </div>
 
-              {/* USER OR FAMILY MEMBER DETAILS */}
+              {/* USER OR FAMILY DETAILS */}
               {editingSelf ? (
                 <div className="family-self-info">
                   <p>
@@ -911,7 +1127,10 @@ function Dashboard() {
               )}
 
               {error && (
-                <p className="family-form-error" role="alert">
+                <p
+                  className="family-form-error"
+                  role="alert"
+                >
                   {error}
                 </p>
               )}
@@ -919,9 +1138,13 @@ function Dashboard() {
               <button
                 type="submit"
                 className="family-save-button"
-                disabled={processingPhoto}
+                disabled={
+                  processingPhoto || saving
+                }
               >
-                {editingSelf
+                {saving
+                  ? "Saving..."
+                  : editingSelf
                   ? "Save My Photo"
                   : editingId
                   ? "Save Changes"
@@ -932,9 +1155,8 @@ function Dashboard() {
                 <button
                   type="button"
                   className="family-delete-button"
-                  onClick={() =>
-                    handleDeleteMember(editingId)
-                  }
+                  onClick={handleDeleteMember}
+                  disabled={saving}
                 >
                   <Trash2 size={18} />
                   Delete Member
