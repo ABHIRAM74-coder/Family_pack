@@ -1708,8 +1708,7 @@ function Dashboard() {
             </h2>
 
             <p>
-              You have been logged out due
-              to 45 seconds of inactivity.
+              Please Login again to continue using the application.
             </p>
 
             <p>
