@@ -38,6 +38,8 @@ import "./Dashboard.css";
 const API_URL =
   "https://df9aajz1zf.execute-api.ap-southeast-2.amazonaws.com";
 
+const INACTIVITY_LIMIT = 45 * 1000;
+
 const RELATIONSHIPS = [
   "Mother",
   "Father",
@@ -61,8 +63,10 @@ const CATEGORIES = [
   { name: "Health", icon: HeartPulse, color: "#d84b72" },
 ];
 
+// Cognito authentication token
 async function getAuthToken() {
   const session = await fetchAuthSession();
+
   const token = session.tokens?.idToken?.toString();
 
   if (!token) {
@@ -74,6 +78,7 @@ async function getAuthToken() {
   return token;
 }
 
+// Authenticated API Gateway request
 async function apiRequest(method, path, body) {
   const token = await getAuthToken();
 
@@ -100,22 +105,19 @@ async function apiRequest(method, path, body) {
   return result;
 }
 
-// Compress selected images to JPEG.
-// This keeps profile photos small and consistent.
+// Compress photo before uploading
 function processProfilePhoto(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
 
-    reader.onerror = () => {
+    reader.onerror = () =>
       reject(new Error("Unable to read the selected photo."));
-    };
 
     reader.onload = () => {
       const image = new Image();
 
-      image.onerror = () => {
+      image.onerror = () =>
         reject(new Error("Unable to open the selected image."));
-      };
 
       image.onload = () => {
         const canvas = document.createElement("canvas");
@@ -139,13 +141,10 @@ function processProfilePhoto(file) {
         const context = canvas.getContext("2d");
 
         if (!context) {
-          reject(
-            new Error("Image processing is unavailable.")
-          );
+          reject(new Error("Image processing is unavailable."));
           return;
         }
 
-        // White background for transparent PNG/WebP images.
         context.fillStyle = "#ffffff";
         context.fillRect(
           0,
@@ -172,7 +171,7 @@ function processProfilePhoto(file) {
   });
 }
 
-// Convert compressed data URL into a JPEG Blob.
+// Convert JPEG data URL into Blob
 function dataUrlToBlob(dataUrl) {
   const [header, encoded] = dataUrl.split(",");
 
@@ -195,8 +194,7 @@ function dataUrlToBlob(dataUrl) {
   });
 }
 
-// Request a temporary S3 upload URL from Lambda,
-// then upload the image directly to the private bucket.
+// Upload profile photo to private S3 bucket
 async function uploadPhotoToS3(memberId, photoDataUrl) {
   const { uploadUrl } = await apiRequest(
     "POST",
@@ -228,7 +226,7 @@ async function uploadPhotoToS3(memberId, photoDataUrl) {
   }
 }
 
-// Retrieve a temporary URL for a stored photo.
+// Get temporary photo viewing URL
 async function getPhotoUrl(memberId) {
   try {
     const result = await apiRequest(
@@ -240,7 +238,10 @@ async function getPhotoUrl(memberId) {
 
     return result.viewUrl || "";
   } catch (error) {
-    if (error.message === "Photo not found") {
+    if (
+      error.message === "Photo not found" ||
+      error.message.includes("404")
+    ) {
       return "";
     }
 
@@ -248,7 +249,7 @@ async function getPhotoUrl(memberId) {
   }
 }
 
-// Delete the stored S3 photo.
+// Delete profile photo from S3
 async function deletePhotoFromS3(memberId) {
   await apiRequest("DELETE", "/photos", {
     memberId,
@@ -279,8 +280,6 @@ function Dashboard() {
   const [memberName, setMemberName] = useState("");
   const [relationship, setRelationship] = useState("");
   const [memberPhoto, setMemberPhoto] = useState("");
-
-  // True when the user has selected or removed a photo.
   const [photoChanged, setPhotoChanged] = useState(false);
 
   const [processingPhoto, setProcessingPhoto] =
@@ -293,11 +292,12 @@ function Dashboard() {
   const [error, setError] = useState("");
   const [logoutError, setLogoutError] = useState("");
 
-  // Refresh temporary S3 URLs before their 5-minute expiry.
   const [photoRefresh, setPhotoRefresh] = useState(0);
 
-  // Existing browser photo keys are retained only
-  // for compatibility with older local profile photos.
+  // NEW: Session timeout message state
+  const [sessionTimedOut, setSessionTimedOut] =
+    useState(false);
+
   const myPhotoKey = user
     ? `family-app-profile-photo-${user.id}`
     : null;
@@ -318,7 +318,7 @@ function Dashboard() {
     }
   };
 
-  // Load authenticated Cognito user.
+  // Load Cognito user
   useEffect(() => {
     let active = true;
 
@@ -357,7 +357,164 @@ function Dashboard() {
     };
   }, [navigate]);
 
-  // Periodically refresh signed S3 image URLs.
+  // =====================================================
+  // NEW FEATURE: 45-SECOND INACTIVITY SESSION TIMEOUT
+  // =====================================================
+  useEffect(() => {
+    if (!user || loggingOut || sessionTimedOut) {
+      return;
+    }
+
+    let inactivityTimer = null;
+    let expired = false;
+    let lastActivity = Date.now();
+
+    const expireSession = async () => {
+      if (expired) return;
+
+      expired = true;
+      clearTimeout(inactivityTimer);
+
+      // Remove listeners immediately to stop further resets.
+      activityEvents.forEach((eventName) => {
+        window.removeEventListener(
+          eventName,
+          resetInactivityTimer
+        );
+      });
+
+      document.removeEventListener(
+        "visibilitychange",
+        checkInactivity
+      );
+
+      window.removeEventListener(
+        "focus",
+        checkInactivity
+      );
+
+      setSessionTimedOut(true);
+
+      try {
+        await signOut();
+      } catch (err) {
+        console.error(
+          "Automatic session logout error:",
+          err
+        );
+      } finally {
+        setUser(null);
+        setMembers([]);
+        setMyPhoto("");
+
+        navigate("/login", {
+          replace: true,
+          state: {
+            sessionTimeout: true,
+          },
+        });
+      }
+    };
+
+    const checkInactivity = () => {
+      if (expired) return;
+
+      const elapsed = Date.now() - lastActivity;
+
+      if (elapsed >= INACTIVITY_LIMIT) {
+        expireSession();
+      } else {
+        clearTimeout(inactivityTimer);
+
+        inactivityTimer = setTimeout(
+          expireSession,
+          INACTIVITY_LIMIT - elapsed
+        );
+      }
+    };
+
+    const resetInactivityTimer = () => {
+      if (expired) return;
+
+      // Do not count activity while the tab is hidden.
+      if (document.hidden) return;
+
+      // Check elapsed time before accepting new activity.
+      // This prevents a late click from reviving an
+      // already-expired session.
+      if (
+        Date.now() - lastActivity >=
+        INACTIVITY_LIMIT
+      ) {
+        expireSession();
+        return;
+      }
+
+      lastActivity = Date.now();
+
+      clearTimeout(inactivityTimer);
+
+      inactivityTimer = setTimeout(
+        expireSession,
+        INACTIVITY_LIMIT
+      );
+    };
+
+    const activityEvents = [
+      "mousemove",
+      "mousedown",
+      "keydown",
+      "scroll",
+      "touchstart",
+      "pointerdown",
+    ];
+
+    activityEvents.forEach((eventName) => {
+      window.addEventListener(
+        eventName,
+        resetInactivityTimer,
+        { passive: true }
+      );
+    });
+
+    document.addEventListener(
+      "visibilitychange",
+      checkInactivity
+    );
+
+    window.addEventListener(
+      "focus",
+      checkInactivity
+    );
+
+    inactivityTimer = setTimeout(
+      expireSession,
+      INACTIVITY_LIMIT
+    );
+
+    return () => {
+      clearTimeout(inactivityTimer);
+
+      activityEvents.forEach((eventName) => {
+        window.removeEventListener(
+          eventName,
+          resetInactivityTimer
+        );
+      });
+
+      document.removeEventListener(
+        "visibilitychange",
+        checkInactivity
+      );
+
+      window.removeEventListener(
+        "focus",
+        checkInactivity
+      );
+    };
+  }, [user?.id, loggingOut, sessionTimedOut, navigate]);
+
+  // Refresh signed S3 URLs before expiration
   useEffect(() => {
     if (!user) return;
 
@@ -368,8 +525,7 @@ function Dashboard() {
     return () => clearInterval(interval);
   }, [user?.id]);
 
-  // Load family members from DynamoDB and their photos
-  // from private S3 storage.
+  // Load family members from DynamoDB
   useEffect(() => {
     if (!user) return;
 
@@ -401,7 +557,6 @@ function Dashboard() {
 
         setMembers(loadedMembers);
 
-        // Load all family photos without blocking the list.
         const photoResults = await Promise.allSettled(
           loadedMembers.map(async (member) => ({
             id: member.id,
@@ -420,7 +575,8 @@ function Dashboard() {
 
         photoResults.forEach((result) => {
           if (result.status === "fulfilled") {
-            photoMap[result.value.id] = result.value.url;
+            photoMap[result.value.id] =
+              result.value.url;
           } else {
             console.error(
               "Unable to retrieve family photo:",
@@ -445,7 +601,8 @@ function Dashboard() {
 
         if (active) {
           setMembersError(
-            err.message || "Unable to load family members."
+            err.message ||
+              "Unable to load family members."
           );
         }
       } finally {
@@ -462,14 +619,13 @@ function Dashboard() {
     };
   }, [user?.id, photoRefresh]);
 
-  // Load the logged-in user's own photo from S3.
+  // Load logged-in user's photo from S3
   useEffect(() => {
     if (!user) return;
 
     let active = true;
 
     async function loadMyPhoto() {
-      // Existing local photo is a temporary fallback.
       let fallback = "";
 
       try {
@@ -559,7 +715,6 @@ function Dashboard() {
     setShowAddModal(true);
   };
 
-  // Select a new photo.
   const handlePhotoChange = async (event) => {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -571,45 +726,57 @@ function Dashboard() {
         file.type
       )
     ) {
-      setError("Please select a JPG, PNG, or WebP image.");
+      setError(
+        "Please select a JPG, PNG, or WebP image."
+      );
       return;
     }
 
     if (file.size > 5 * 1024 * 1024) {
-      setError("Please select an image smaller than 5 MB.");
+      setError(
+        "Please select an image smaller than 5 MB."
+      );
       return;
     }
 
-    const requestId = ++photoRequestRef.current;
+    const requestId =
+      ++photoRequestRef.current;
 
     setProcessingPhoto(true);
     setError("");
 
     try {
-      const photo = await processProfilePhoto(file);
+      const photo =
+        await processProfilePhoto(file);
 
-      if (requestId !== photoRequestRef.current) {
+      if (
+        requestId !== photoRequestRef.current
+      ) {
         return;
       }
 
       setMemberPhoto(photo);
       setPhotoChanged(true);
     } catch (err) {
-      if (requestId !== photoRequestRef.current) {
+      if (
+        requestId !== photoRequestRef.current
+      ) {
         return;
       }
 
       setError(
-        err.message || "Unable to process the photo."
+        err.message ||
+          "Unable to process the photo."
       );
     } finally {
-      if (requestId === photoRequestRef.current) {
+      if (
+        requestId === photoRequestRef.current
+      ) {
         setProcessingPhoto(false);
       }
     }
   };
 
-  // Mark the photo for deletion.
   const handleRemovePhoto = () => {
     photoRequestRef.current += 1;
     setProcessingPhoto(false);
@@ -618,17 +785,19 @@ function Dashboard() {
     setError("");
   };
 
-  // Save an uploaded photo or remove the previous one.
   async function savePhotoChange(memberId) {
     if (!photoChanged) {
       return null;
     }
 
     if (memberPhoto) {
-      await uploadPhotoToS3(memberId, memberPhoto);
+      await uploadPhotoToS3(
+        memberId,
+        memberPhoto
+      );
 
-      // Get a new signed URL after successful upload.
-      const updatedUrl = await getPhotoUrl(memberId);
+      const updatedUrl =
+        await getPhotoUrl(memberId);
 
       if (!updatedUrl) {
         throw new Error(
@@ -640,42 +809,50 @@ function Dashboard() {
     }
 
     await deletePhotoFromS3(memberId);
+
     return "";
   }
 
-  // Save user profile or family member.
   const handleSaveMember = async (event) => {
     event.preventDefault();
     setError("");
 
-    if (processingPhoto || saving) return;
+    if (processingPhoto || saving) {
+      return;
+    }
 
-    // Update the logged-in user's own photo.
+    // Save own profile photo
     if (editingSelf) {
       setSaving(true);
 
       try {
-        const result = await savePhotoChange("me");
+        const result =
+          await savePhotoChange("me");
 
         if (result !== null) {
           setMyPhoto(result);
 
-          // Remove outdated local copy once AWS succeeds.
           if (myPhotoKey) {
             try {
-              localStorage.removeItem(myPhotoKey);
+              localStorage.removeItem(
+                myPhotoKey
+              );
             } catch {
-              // AWS copy is still saved.
+              // Photo is saved in AWS.
             }
           }
         }
 
         closeModal();
       } catch (err) {
-        console.error("Unable to save my photo:", err);
+        console.error(
+          "Unable to save my photo:",
+          err
+        );
 
         setError(
-          err.message || "Unable to save your profile photo."
+          err.message ||
+            "Unable to save your profile photo."
         );
       } finally {
         setSaving(false);
@@ -687,30 +864,37 @@ function Dashboard() {
     const name = memberName.trim();
 
     if (!name) {
-      setError("Please enter the family member's name.");
+      setError(
+        "Please enter the family member's name."
+      );
       return;
     }
 
     if (!relationship) {
-      setError("Please select a relationship.");
+      setError(
+        "Please select a relationship."
+      );
       return;
     }
 
-    // Edit an existing family member's photo.
+    // Edit family member photo
     if (editingId) {
       const existing = members.find(
-        (member) => member.id === editingId
+        (member) =>
+          member.id === editingId
       );
 
       if (!existing) {
-        setError("Family member not found.");
+        setError(
+          "Family member not found."
+        );
         return;
       }
 
-      // The current Lambda doesn't support PUT /members.
       if (
         name !== existing.name ||
-        relationship !== existing.relationship
+        relationship !==
+          existing.relationship
       ) {
         setError(
           "Saving name or relationship changes requires the AWS update endpoint. We will add that next."
@@ -721,25 +905,28 @@ function Dashboard() {
       setSaving(true);
 
       try {
-        const result = await savePhotoChange(editingId);
+        const result =
+          await savePhotoChange(editingId);
 
         if (result !== null) {
-          // Prevent an older photo-loading request
-          // from replacing the new photo.
           photoVersionRef.current += 1;
 
           setMembers((previous) =>
             previous.map((member) =>
               member.id === editingId
-                ? { ...member, photo: result }
+                ? {
+                    ...member,
+                    photo: result,
+                  }
                 : member
             )
           );
 
-          // Remove old browser-stored photo.
           if (memberPhotosKey) {
             try {
-              const photos = getMemberPhotos();
+              const photos =
+                getMemberPhotos();
+
               delete photos[editingId];
 
               localStorage.setItem(
@@ -747,17 +934,21 @@ function Dashboard() {
                 JSON.stringify(photos)
               );
             } catch {
-              // AWS photo is already saved.
+              // AWS photo is saved.
             }
           }
         }
 
         closeModal();
       } catch (err) {
-        console.error("Unable to update photo:", err);
+        console.error(
+          "Unable to update photo:",
+          err
+        );
 
         setError(
-          err.message || "Unable to update the profile photo."
+          err.message ||
+            "Unable to update the profile photo."
         );
       } finally {
         setSaving(false);
@@ -766,7 +957,7 @@ function Dashboard() {
       return;
     }
 
-    // Create a new family member in DynamoDB.
+    // Create new family member
     setSaving(true);
 
     let createdMember = null;
@@ -789,7 +980,6 @@ function Dashboard() {
         );
       }
 
-      // Add the new member immediately after DynamoDB saves.
       setMembers((previous) => [
         ...previous,
         {
@@ -799,17 +989,21 @@ function Dashboard() {
         },
       ]);
 
-      // If a photo was selected, upload it to S3.
-      if (photoChanged && memberPhoto) {
-        const photoUrl = await savePhotoChange(
-          createdMember.memberId
-        );
+      if (
+        photoChanged &&
+        memberPhoto
+      ) {
+        const photoUrl =
+          await savePhotoChange(
+            createdMember.memberId
+          );
 
         photoVersionRef.current += 1;
 
         setMembers((previous) =>
           previous.map((member) =>
-            member.id === createdMember.memberId
+            member.id ===
+            createdMember.memberId
               ? {
                   ...member,
                   photo: photoUrl || "",
@@ -821,7 +1015,10 @@ function Dashboard() {
 
       closeModal();
     } catch (err) {
-      console.error("Unable to create member:", err);
+      console.error(
+        "Unable to create member:",
+        err
+      );
 
       if (createdMember?.memberId) {
         setError(
@@ -830,7 +1027,8 @@ function Dashboard() {
         );
       } else {
         setError(
-          err.message || "Unable to save family member."
+          err.message ||
+            "Unable to save family member."
         );
       }
     } finally {
@@ -838,15 +1036,15 @@ function Dashboard() {
     }
   };
 
-  // Family member deletion still needs
-  // a separate DynamoDB DELETE /members endpoint.
+  // Existing backend doesn't yet support
+  // deleting DynamoDB family-member records.
   const handleDeleteMember = () => {
     setError(
       "Deleting family members requires the AWS DELETE endpoint. We will add that next."
     );
   };
 
-  // Cognito logout.
+  // Manual logout
   const handleLogout = async () => {
     if (loggingOut) return;
 
@@ -860,9 +1058,14 @@ function Dashboard() {
       setMembers([]);
       setMyPhoto("");
 
-      navigate("/login", { replace: true });
+      navigate("/login", {
+        replace: true,
+      });
     } catch (err) {
-      console.error("Logout error:", err);
+      console.error(
+        "Logout error:",
+        err
+      );
 
       setLogoutError(
         "Unable to log out. Please try again."
@@ -903,7 +1106,8 @@ function Dashboard() {
 
             <div className="dashboard-greeting">
               <h1>
-                {user.name || "Complete your profile"}
+                {user.name ||
+                  "Complete your profile"}
               </h1>
               <p>Welcome Back!</p>
             </div>
@@ -913,7 +1117,9 @@ function Dashboard() {
             <button
               className="dashboard-circle-button"
               aria-label="Calendar"
-              onClick={() => setActiveTab("Calendar")}
+              onClick={() =>
+                setActiveTab("Calendar")
+              }
             >
               <CalendarDays size={25} />
             </button>
@@ -972,7 +1178,9 @@ function Dashboard() {
           </div>
 
           {loadingMembers && (
-            <p>Loading family members...</p>
+            <p>
+              Loading family members...
+            </p>
           )}
 
           {membersError && (
@@ -1020,7 +1228,9 @@ function Dashboard() {
                 key={member.id}
                 type="button"
                 className="family-member family-member-button"
-                onClick={() => openEditModal(member)}
+                onClick={() =>
+                  openEditModal(member)
+                }
                 title={`Edit ${member.name}`}
               >
                 <div className="family-avatar">
@@ -1069,7 +1279,9 @@ function Dashboard() {
 
             <button
               className="dashboard-text-button"
-              onClick={() => setActiveTab("Category")}
+              onClick={() =>
+                setActiveTab("Category")
+              }
             >
               See all
             </button>
@@ -1077,21 +1289,27 @@ function Dashboard() {
 
           <div className="dashboard-categories">
             {CATEGORIES.map((category) => {
-              const CategoryIcon = category.icon;
+              const CategoryIcon =
+                category.icon;
 
               return (
                 <button
                   key={category.name}
                   className="dashboard-category-pill"
                   style={{
-                    "--category-color": category.color,
+                    "--category-color":
+                      category.color,
                   }}
                   onClick={() =>
-                    setActiveTab(category.name)
+                    setActiveTab(
+                      category.name
+                    )
                   }
                 >
                   <CategoryIcon size={26} />
-                  <span>{category.name}</span>
+                  <span>
+                    {category.name}
+                  </span>
                 </button>
               );
             })}
@@ -1106,7 +1324,9 @@ function Dashboard() {
             <button
               className="dashboard-text-button"
               onClick={() =>
-                setActiveTab("Notifications")
+                setActiveTab(
+                  "Notifications"
+                )
               }
             >
               See all
@@ -1123,17 +1343,21 @@ function Dashboard() {
                 Reminders
               </span>
 
-              <h3>No reminders yet</h3>
+              <h3>
+                No reminders yet
+              </h3>
 
               <p>
-                Important document renewals and reminders
-                will appear here.
+                Important document renewals
+                and reminders will appear here.
               </p>
 
               <button
                 className="attention-action"
                 onClick={() =>
-                  setActiveTab("Reminders")
+                  setActiveTab(
+                    "Reminders"
+                  )
                 }
               >
                 Manage Reminders
@@ -1146,10 +1370,13 @@ function Dashboard() {
         {/* OTHER SECTIONS */}
         {activeTab !== "Home" && (
           <section className="dashboard-current-tab">
-            <h3>{activeTab}</h3>
+            <h3>
+              {activeTab}
+            </h3>
+
             <p>
-              This section will be implemented
-              in the next phase.
+              This section will be
+              implemented in the next phase.
             </p>
           </section>
         )}
@@ -1171,6 +1398,7 @@ function Dashboard() {
           disabled={loggingOut}
         >
           <LogOut size={20} />
+
           {loggingOut
             ? "Logging out..."
             : "Logout"}
@@ -1181,9 +1409,13 @@ function Dashboard() {
       <nav className="dashboard-bottom-nav">
         <button
           className={
-            activeTab === "Home" ? "active" : ""
+            activeTab === "Home"
+              ? "active"
+              : ""
           }
-          onClick={() => setActiveTab("Home")}
+          onClick={() =>
+            setActiveTab("Home")
+          }
         >
           <Home size={23} />
           <span>Home</span>
@@ -1191,7 +1423,9 @@ function Dashboard() {
 
         <button
           className={
-            activeTab === "My Family" ? "active" : ""
+            activeTab === "My Family"
+              ? "active"
+              : ""
           }
           onClick={() =>
             setActiveTab("My Family")
@@ -1211,7 +1445,9 @@ function Dashboard() {
 
         <button
           className={
-            activeTab === "Category" ? "active" : ""
+            activeTab === "Category"
+              ? "active"
+              : ""
           }
           onClick={() =>
             setActiveTab("Category")
@@ -1223,7 +1459,9 @@ function Dashboard() {
 
         <button
           className={
-            activeTab === "Settings" ? "active" : ""
+            activeTab === "Settings"
+              ? "active"
+              : ""
           }
           onClick={() =>
             setActiveTab("Settings")
@@ -1239,7 +1477,9 @@ function Dashboard() {
         <div
           className="family-modal-overlay"
           onClick={() => {
-            if (!saving) closeModal();
+            if (!saving) {
+              closeModal();
+            }
           }}
         >
           <div
@@ -1292,7 +1532,9 @@ function Dashboard() {
                   type="file"
                   accept="image/jpeg,image/png,image/webp"
                   onChange={handlePhotoChange}
-                  style={{ display: "none" }}
+                  style={{
+                    display: "none",
+                  }}
                   aria-label="Select profile photo"
                 />
 
@@ -1300,7 +1542,8 @@ function Dashboard() {
                   type="button"
                   className="family-upload-photo-button"
                   disabled={
-                    processingPhoto || saving
+                    processingPhoto ||
+                    saving
                   }
                   onClick={() =>
                     photoInputRef.current?.click()
@@ -1331,12 +1574,19 @@ function Dashboard() {
               {editingSelf ? (
                 <div className="family-self-info">
                   <p>
-                    <strong>Name:</strong>{" "}
-                    {user.name || "Not provided"}
+                    <strong>
+                      Name:
+                    </strong>{" "}
+                    {user.name ||
+                      "Not provided"}
                   </p>
+
                   <p>
-                    <strong>Email:</strong>{" "}
-                    {user.email || "Not provided"}
+                    <strong>
+                      Email:
+                    </strong>{" "}
+                    {user.email ||
+                      "Not provided"}
                   </p>
                 </div>
               ) : (
@@ -1351,7 +1601,9 @@ function Dashboard() {
                     placeholder="Enter family member's name"
                     value={memberName}
                     onChange={(event) =>
-                      setMemberName(event.target.value)
+                      setMemberName(
+                        event.target.value
+                      )
                     }
                     maxLength={100}
                     required
@@ -1365,7 +1617,9 @@ function Dashboard() {
                     id="member-relationship"
                     value={relationship}
                     onChange={(event) =>
-                      setRelationship(event.target.value)
+                      setRelationship(
+                        event.target.value
+                      )
                     }
                     required
                   >
@@ -1373,14 +1627,16 @@ function Dashboard() {
                       Select Relationship
                     </option>
 
-                    {RELATIONSHIPS.map((relation) => (
-                      <option
-                        key={relation}
-                        value={relation}
-                      >
-                        {relation}
-                      </option>
-                    ))}
+                    {RELATIONSHIPS.map(
+                      (relation) => (
+                        <option
+                          key={relation}
+                          value={relation}
+                        >
+                          {relation}
+                        </option>
+                      )
+                    )}
                   </select>
                 </>
               )}
@@ -1398,7 +1654,8 @@ function Dashboard() {
                 type="submit"
                 className="family-save-button"
                 disabled={
-                  processingPhoto || saving
+                  processingPhoto ||
+                  saving
                 }
               >
                 {saving
@@ -1410,18 +1667,54 @@ function Dashboard() {
                   : "Create Profile"}
               </button>
 
-              {editingId && !editingSelf && (
-                <button
-                  type="button"
-                  className="family-delete-button"
-                  onClick={handleDeleteMember}
-                  disabled={saving}
-                >
-                  <Trash2 size={18} />
-                  Delete Member
-                </button>
-              )}
+              {editingId &&
+                !editingSelf && (
+                  <button
+                    type="button"
+                    className="family-delete-button"
+                    onClick={handleDeleteMember}
+                    disabled={saving}
+                  >
+                    <Trash2 size={18} />
+                    Delete Member
+                  </button>
+                )}
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* NEW: SESSION TIMEOUT MESSAGE */}
+      {sessionTimedOut && (
+        <div
+          className="family-modal-overlay"
+          style={{
+            zIndex: 9999,
+          }}
+        >
+          <div
+            className="family-modal"
+            role="alertdialog"
+            aria-modal="true"
+            aria-label="Session Timeout"
+            style={{
+              maxWidth: "400px",
+              textAlign: "center",
+              padding: "35px 25px",
+            }}
+          >
+            <h2>
+              Session Timeout
+            </h2>
+
+            <p>
+              You have been logged out due
+              to 45 seconds of inactivity.
+            </p>
+
+            <p>
+              Redirecting to login...
+            </p>
           </div>
         </div>
       )}
