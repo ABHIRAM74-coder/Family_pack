@@ -270,9 +270,13 @@ function Dashboard() {
   const [members, setMembers] = useState([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
 
-  // Hide dashboard until initial profile requests finish.
-  const [initialMembersReady, setInitialMembersReady] = useState(false);
-  const [initialPhotoReady, setInitialPhotoReady] = useState(false);
+  // NEW: Track initial AWS loading for Add Member spinner
+  const [initialMembersReady, setInitialMembersReady] =
+    useState(false);
+
+  const [initialPhotoReady, setInitialPhotoReady] =
+    useState(false);
+
   const [membersError, setMembersError] = useState("");
 
   const [myPhoto, setMyPhoto] = useState("");
@@ -298,9 +302,11 @@ function Dashboard() {
 
   const [photoRefresh, setPhotoRefresh] = useState(0);
 
-  // Session timeout message state
   const [sessionTimedOut, setSessionTimedOut] =
     useState(false);
+
+  // NEW: True only while the initial AWS member request is pending
+  const familyLoading = !initialMembersReady;
 
   const myPhotoKey = user
     ? `family-app-profile-photo-${user.id}`
@@ -524,7 +530,10 @@ function Dashboard() {
     return () => clearInterval(interval);
   }, [user?.id]);
 
-  // Load family members from DynamoDB
+  // =====================================================
+  // LOAD FAMILY MEMBERS FROM DYNAMODB
+  // NEW: Add Member spinner remains visible until done
+  // =====================================================
   useEffect(() => {
     if (!user) return;
 
@@ -678,6 +687,9 @@ function Dashboard() {
   };
 
   const openAddModal = () => {
+    // Prevent adding while initial family data is loading
+    if (familyLoading) return;
+
     photoRequestRef.current += 1;
 
     setEditingSelf(false);
@@ -1049,7 +1061,6 @@ function Dashboard() {
   };
 
   // Manual logout
-  // NEW: The loading screen appears immediately when logout begins.
   const handleLogout = async () => {
     if (loggingOut) return;
 
@@ -1081,10 +1092,8 @@ function Dashboard() {
   };
 
   // =====================================================
-  // NEW FEATURE: SMOOTH FULL-SCREEN LOGOUT TRANSITION
+  // KEEP SMOOTH LOGOUT SCREEN
   // =====================================================
-  // This check comes BEFORE the dashboard loading check
-  // so logout always displays the correct message.
   if (loggingOut) {
     return (
       <div
@@ -1097,7 +1106,6 @@ function Dashboard() {
             className="dashboard-spinner"
             aria-hidden="true"
           />
-
           <h2>Logging out, please wait...</h2>
           <p>Securely ending your session</p>
         </div>
@@ -1105,29 +1113,13 @@ function Dashboard() {
     );
   }
 
-  // Show the dashboard only after its initial data is ready.
-  // Later background refreshes will not cover the dashboard again.
-  if (
-    loading ||
-    (user && (!initialMembersReady || !initialPhotoReady))
-  ) {
-    return (
-      <div
-        className="dashboard-loading"
-        role="status"
-        aria-live="polite"
-      >
-        <div className="dashboard-loading-content">
-          <div
-            className="dashboard-spinner"
-            aria-hidden="true"
-          />
-
-          <h2>Loading, please wait...</h2>
-          <p>Preparing your family dashboard</p>
-        </div>
-      </div>
-    );
+  // =====================================================
+  // REMOVED: FULL-SCREEN DASHBOARD DATA LOADING
+  // =====================================================
+  // Only wait for Cognito to identify the user.
+  // Family profiles load inside the visible dashboard.
+  if (loading) {
+    return null;
   }
 
   if (!user) return null;
@@ -1218,17 +1210,14 @@ function Dashboard() {
             <button
               className="dashboard-icon-button"
               onClick={openAddModal}
+              disabled={familyLoading}
               aria-label="Add family member"
             >
               <Pencil size={24} />
             </button>
           </div>
 
-          {loadingMembers && (
-            <p>
-              Loading family members...
-            </p>
-          )}
+          {/* Old "Loading family members..." text removed */}
 
           {membersError && (
             <p
@@ -1302,18 +1291,33 @@ function Dashboard() {
               </button>
             ))}
 
-            {/* ADD MEMBER */}
+            {/* NEW: ADD MEMBER SPINNER */}
             <button
               type="button"
               className="family-member family-member-button"
               onClick={openAddModal}
+              disabled={familyLoading}
+              aria-label={
+                familyLoading
+                  ? "Loading family profiles"
+                  : "Add family member"
+              }
             >
               <div className="family-avatar add-avatar">
-                <Plus size={30} />
+                {familyLoading ? (
+                  <div
+                    className="family-add-spinner"
+                    aria-hidden="true"
+                  />
+                ) : (
+                  <Plus size={30} />
+                )}
               </div>
 
               <span className="family-member-name">
-                Add Member
+                {familyLoading
+                  ? "Loading..."
+                  : "Add Member"}
               </span>
             </button>
           </div>
@@ -1486,6 +1490,7 @@ function Dashboard() {
           className="dashboard-floating-add"
           aria-label="Add family member"
           onClick={openAddModal}
+          disabled={familyLoading}
         >
           <Plus size={32} />
         </button>

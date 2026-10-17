@@ -1029,3 +1029,43 @@
     transform: rotate(360deg);
   }
 }
+
+/* ==========================================
+   SMOOTH ADD MEMBER LOADING SPINNER
+   ========================================== */
+
+.family-add-spinner {
+  width: 30px;
+  height: 30px;
+  box-sizing: border-box;
+
+  border: 3px solid rgba(128, 84, 217, 0.18);
+  border-top-color: #8054d9;
+  border-right-color: #b69af1;
+
+  border-radius: 50%;
+
+  animation: family-add-spin 0.85s linear infinite;
+
+  will-change: transform;
+}
+
+@keyframes family-add-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Keep loading button visually consistent */
+.family-member-button:disabled {
+  cursor: default;
+}
+
+/* Maintain the Add Member button appearance */
+.family-member-button:disabled .add-avatar {
+  opacity: 1;
+}
