@@ -269,6 +269,10 @@ function Dashboard() {
 
   const [members, setMembers] = useState([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
+
+  // Keep the dashboard hidden until the first member and profile-photo requests finish.
+  const [initialMembersReady, setInitialMembersReady] = useState(false);
+  const [initialPhotoReady, setInitialPhotoReady] = useState(false);
   const [membersError, setMembersError] = useState("");
 
   const [myPhoto, setMyPhoto] = useState("");
@@ -358,7 +362,7 @@ function Dashboard() {
   }, [navigate]);
 
   // =====================================================
-  // NEW FEATURE: 45-SECOND INACTIVITY SESSION TIMEOUT
+  // NEW FEATURE: 1-MINUTE INACTIVITY SESSION TIMEOUT
   // =====================================================
   useEffect(() => {
     if (!user || loggingOut || sessionTimedOut) {
@@ -608,6 +612,7 @@ function Dashboard() {
       } finally {
         if (active) {
           setLoadingMembers(false);
+          setInitialMembersReady(true);
         }
       }
     }
@@ -647,6 +652,10 @@ function Dashboard() {
 
         if (active) {
           setMyPhoto(fallback);
+        }
+      } finally {
+        if (active) {
+          setInitialPhotoReady(true);
         }
       }
     }
@@ -1075,10 +1084,16 @@ function Dashboard() {
     }
   };
 
-  if (loading) {
+  // Show the dashboard only after its initial data is ready.
+  // Later background refreshes will not cover the dashboard again.
+  if (loading || (user && (!initialMembersReady || !initialPhotoReady))) {
     return (
-      <div className="dashboard-loading">
-        Loading your dashboard...
+      <div className="dashboard-loading" role="status" aria-live="polite">
+        <div className="dashboard-loading-content">
+          <div className="dashboard-spinner" aria-hidden="true" />
+          <h2>Loading, please wait...</h2>
+          <p>Preparing your family dashboard</p>
+        </div>
       </div>
     );
   }
