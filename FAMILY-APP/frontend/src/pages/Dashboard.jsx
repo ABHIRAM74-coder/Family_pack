@@ -270,7 +270,7 @@ function Dashboard() {
   const [members, setMembers] = useState([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
 
-  // Keep the dashboard hidden until the first member and profile-photo requests finish.
+  // Hide dashboard until initial profile requests finish.
   const [initialMembersReady, setInitialMembersReady] = useState(false);
   const [initialPhotoReady, setInitialPhotoReady] = useState(false);
   const [membersError, setMembersError] = useState("");
@@ -298,7 +298,7 @@ function Dashboard() {
 
   const [photoRefresh, setPhotoRefresh] = useState(0);
 
-  // NEW: Session timeout message state
+  // Session timeout message state
   const [sessionTimedOut, setSessionTimedOut] =
     useState(false);
 
@@ -362,7 +362,7 @@ function Dashboard() {
   }, [navigate]);
 
   // =====================================================
-  // NEW FEATURE: 1-MINUTE INACTIVITY SESSION TIMEOUT
+  // 1-MINUTE INACTIVITY SESSION TIMEOUT
   // =====================================================
   useEffect(() => {
     if (!user || loggingOut || sessionTimedOut) {
@@ -379,7 +379,6 @@ function Dashboard() {
       expired = true;
       clearTimeout(inactivityTimer);
 
-      // Remove listeners immediately to stop further resets.
       activityEvents.forEach((eventName) => {
         window.removeEventListener(
           eventName,
@@ -440,12 +439,8 @@ function Dashboard() {
     const resetInactivityTimer = () => {
       if (expired) return;
 
-      // Do not count activity while the tab is hidden.
       if (document.hidden) return;
 
-      // Check elapsed time before accepting new activity.
-      // This prevents a late click from reviving an
-      // already-expired session.
       if (
         Date.now() - lastActivity >=
         INACTIVITY_LIMIT
@@ -1054,6 +1049,7 @@ function Dashboard() {
   };
 
   // Manual logout
+  // NEW: The loading screen appears immediately when logout begins.
   const handleLogout = async () => {
     if (loggingOut) return;
 
@@ -1084,13 +1080,49 @@ function Dashboard() {
     }
   };
 
+  // =====================================================
+  // NEW FEATURE: SMOOTH FULL-SCREEN LOGOUT TRANSITION
+  // =====================================================
+  // This check comes BEFORE the dashboard loading check
+  // so logout always displays the correct message.
+  if (loggingOut) {
+    return (
+      <div
+        className="dashboard-loading"
+        role="status"
+        aria-live="polite"
+      >
+        <div className="dashboard-loading-content">
+          <div
+            className="dashboard-spinner"
+            aria-hidden="true"
+          />
+
+          <h2>Logging out, please wait...</h2>
+          <p>Securely ending your session</p>
+        </div>
+      </div>
+    );
+  }
+
   // Show the dashboard only after its initial data is ready.
   // Later background refreshes will not cover the dashboard again.
-  if (loading || (user && (!initialMembersReady || !initialPhotoReady))) {
+  if (
+    loading ||
+    (user && (!initialMembersReady || !initialPhotoReady))
+  ) {
     return (
-      <div className="dashboard-loading" role="status" aria-live="polite">
+      <div
+        className="dashboard-loading"
+        role="status"
+        aria-live="polite"
+      >
         <div className="dashboard-loading-content">
-          <div className="dashboard-spinner" aria-hidden="true" />
+          <div
+            className="dashboard-spinner"
+            aria-hidden="true"
+          />
+
           <h2>Loading, please wait...</h2>
           <p>Preparing your family dashboard</p>
         </div>
@@ -1699,7 +1731,7 @@ function Dashboard() {
         </div>
       )}
 
-      {/* NEW: SESSION TIMEOUT MESSAGE */}
+      {/* SESSION TIMEOUT MESSAGE */}
       {sessionTimedOut && (
         <div
           className="family-modal-overlay"

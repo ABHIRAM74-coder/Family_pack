@@ -1004,3 +1004,28 @@
   color: #817397;
   font-size: 14px;
 }
+
+
+/* Smooth spinner shared by login loading and logout */
+
+.dashboard-spinner {
+  width: 48px;
+  height: 48px;
+  box-sizing: border-box;
+  border: 4px solid transparent;
+  border-top-color: #8054d9;
+  border-right-color: #b69af1;
+  border-radius: 50%;
+  animation: dashboard-spin 1s linear infinite;
+  will-change: transform;
+}
+
+@keyframes dashboard-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
