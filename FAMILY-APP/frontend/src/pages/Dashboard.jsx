@@ -338,7 +338,7 @@ function Documents({ memberId, memberName = "My Documents", onClose }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [file, setFile] = useState(null);
-  const [documentType, setDocumentType] = useState("Identity");
+  const [documentType, setDocumentType] = useState("Aadhaar Card");
   const fileInputRef = useRef(null);
   const mountedRef = useRef(true);
 
@@ -364,41 +364,70 @@ function Documents({ memberId, memberName = "My Documents", onClose }) {
 
   async function handleUpload(event) {
     event.preventDefault();
+
     if (!file || busy) return;
+
     setError("");
     setNotice("");
+
     const extension = file.name.split(".").pop()?.toLowerCase();
+
     if (!ALLOWED_EXTENSIONS.has(extension)) {
       setError("Unsupported file type. Select PDF, JPG, PNG, Word, Excel, or PowerPoint.");
       return;
     }
+
     if (file.size < 1 || file.size > MAX_FILE_SIZE) {
       setError("The file must be larger than 0 bytes and no more than 10 MB.");
       return;
     }
 
     setBusy(true);
+    let uploadStage = "Stage 1: Requesting S3 upload URL";
+
     try {
       const result = await documentsApi("POST", "/documents/upload-url", {
-        memberId, documentType, fileName: file.name, fileSize: file.size,
+        memberId,
+        documentType,
+        fileName: file.name,
+        fileSize: file.size,
       });
+
       if (!result.uploadUrl || !result.fields || !result.documentId) {
         throw new Error("AWS returned an incomplete upload response.");
       }
+
+      uploadStage = "Stage 2: Uploading file to S3";
+
       const formData = new FormData();
-      Object.entries(result.fields).forEach(([key, value]) => formData.append(key, value));
+      Object.entries(result.fields).forEach(([key, value]) => {
+        formData.append(key, value);
+      });
       formData.append("file", file);
-      const uploadResponse = await fetch(result.uploadUrl, { method: "POST", body: formData });
+
+      const uploadResponse = await fetch(result.uploadUrl, {
+        method: "POST",
+        body: formData,
+      });
+
       if (!uploadResponse.ok) {
-        throw new Error(`S3 upload failed (${uploadResponse.status}). Check the S3 bucket CORS configuration.`);
+        throw new Error(`S3 upload failed with HTTP ${uploadResponse.status}`);
       }
-      await documentsApi("POST", "/documents/confirm", { documentId: result.documentId });
+
+      uploadStage = "Stage 3: Confirming document upload";
+      await documentsApi("POST", "/documents/confirm", {
+        documentId: result.documentId,
+      });
+
       setFile(null);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+
       setNotice("Document uploaded successfully.");
       await loadDocuments();
     } catch (err) {
-      setError(err.message);
+      setError(`${uploadStage} — ${err.message}`);
     } finally {
       setBusy(false);
     }
