@@ -1070,74 +1070,165 @@
   opacity: 1;
 }
 
-/* ===== DOCUMENT MANAGEMENT STYLES - ADDED WITHOUT REMOVING EXISTING CSS ===== */
-
-/* Family Pack document manager — scoped styles */
 .documents-panel {
   width: 100%;
-  padding: 24px;
-  border-radius: 24px;
-  background: #fff;
-  color: #281b42;
+  padding: 28px;
+  color: #291b43;
   font-family: "DM Sans", sans-serif;
-  box-shadow: 0 6px 24px rgba(75, 40, 120, .07);
 }
-.documents-panel * { box-sizing: border-box; }
-.documents-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
-.documents-header h2 { margin: 0 0 6px; font-size: 22px; font-weight: 800; }
-.documents-header p { margin: 0; font-size: 13px; color: #857b99; }
-.documents-header-actions { display: flex; gap: 8px; flex-shrink: 0; }
-.documents-header-actions button, .documents-item-actions button {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 38px; height: 38px; border: 1px solid #e8dff5; border-radius: 12px;
-  background: #f9f6ff; color: #6840a6; cursor: pointer;
+
+.documents-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
 }
-.documents-header-actions button:hover, .documents-item-actions button:hover { background: #eee5ff; }
-.documents-panel button:disabled { opacity: .55; cursor: not-allowed; }
+
+.documents-header h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.documents-close {
+  border: none;
+  background: #f3edff;
+  color: #56328d;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
 .documents-upload {
-  display: grid; grid-template-columns: 1fr; gap: 10px;
-  padding: 18px; margin-bottom: 20px; border: 1px solid #e8dff5;
-  border-radius: 18px; background: #faf8ff;
+  background: #f8f4ff;
+  border: 1px solid #e8dff5;
+  border-radius: 18px;
+  padding: 20px;
+  margin-bottom: 24px;
 }
-.documents-upload label { font-size: 13px; font-weight: 700; color: #392850; }
-.documents-upload input, .documents-upload select {
-  display: block; width: 100%; min-width: 0; padding: 12px;
-  border: 1px solid #e2d8f0; border-radius: 12px;
-  background: #fff; color: #281b42; font: inherit; font-size: 14px;
+
+.documents-upload h3 {
+  margin: 0 0 16px;
+  font-size: 17px;
 }
-.documents-upload input[type="file"] { overflow: hidden; }
-.documents-upload input:focus-visible, .documents-upload select:focus-visible,
-.documents-panel button:focus-visible { outline: 3px solid #b69af1; outline-offset: 2px; }
-.documents-upload > button {
-  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  min-height: 46px; margin-top: 6px; padding: 10px 16px;
-  border: 0; border-radius: 12px; background: #6840a6;
-  color: #fff; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
+
+.documents-upload label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 700;
 }
-.documents-upload > button:hover:not(:disabled) { background: #512d86; }
-.documents-error, .documents-notice { margin: 12px 0; padding: 12px 14px; border-radius: 12px; font-size: 13px; overflow-wrap: anywhere; }
-.documents-error { background: #fff0f1; color: #ae2842; }
-.documents-notice { background: #eef9f1; color: #25663a; }
-.documents-empty { margin: 18px 0 4px; padding: 22px 12px; text-align: center; color: #857b99; font-size: 14px; }
-.documents-groups { display: grid; gap: 20px; }
-.documents-group h3 { margin: 0 0 10px; color: #56328d; font-size: 16px; font-weight: 800; }
+
+.documents-upload input,
+.documents-upload select {
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 14px;
+  border: 1px solid #ded3ef;
+  border-radius: 12px;
+  background: white;
+  color: #291b43;
+  font: inherit;
+}
+
+.documents-upload button,
+.documents-action {
+  border: none;
+  border-radius: 12px;
+  background: #6840a6;
+  color: white;
+  padding: 12px 18px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.documents-upload button:disabled,
+.documents-action:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.documents-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .documents-item {
-  display: flex; align-items: center; gap: 12px; padding: 13px 10px;
-  border-bottom: 1px solid #eee8f6; color: #6840a6;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid #e8dff5;
+  border-radius: 16px;
+  background: #fff;
 }
-.documents-item:last-child { border-bottom: 0; }
-.documents-item-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.documents-item-info strong { font-size: 14px; color: #281b42; overflow-wrap: anywhere; }
-.documents-item-info span { font-size: 12px; color: #857b99; }
-.documents-item-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-.documents-item-actions button:last-child { color: #c43c53; background: #fff4f5; }
-.documents-item-actions button:last-child:hover { background: #ffe5e9; }
-@media (max-width: 480px) {
-  .documents-panel { padding: 16px; border-radius: 18px; }
-  .documents-header h2 { font-size: 18px; }
-  .documents-header p { font-size: 12px; }
-  .documents-upload { padding: 14px; }
-  .documents-item { gap: 8px; padding: 12px 0; }
-  .documents-item-actions { gap: 4px; }
-  .documents-item-actions button { width: 32px; height: 34px; }
+
+.documents-item-info {
+  flex: 1;
+  min-width: 0;
 }
+
+.documents-item-info strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.documents-item-info span {
+  display: block;
+  margin-top: 5px;
+  color: #857b99;
+  font-size: 12px;
+}
+
+.documents-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.documents-item-actions button {
+  border: none;
+  border-radius: 10px;
+  padding: 9px 12px;
+  background: #f1eaff;
+  color: #56328d;
+  cursor: pointer;
+}
+
+.documents-item-actions button:hover {
+  background: #e5d7ff;
+}
+
+.documents-error {
+  color: #c72d4b;
+  font-size: 13px;
+  margin: 12px 0;
+}
+
+.documents-empty {
+  text-align: center;
+  padding: 30px 15px;
+  color: #857b99;
+}
+
+@media (max-width: 600px) {
+  .documents-panel {
+    padding: 18px;
+  }
+
+  .documents-item {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .documents-item-actions {
+    width: 100%;
+  }
+} 

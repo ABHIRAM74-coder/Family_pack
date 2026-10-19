@@ -1,5 +1,5 @@
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -31,10 +31,11 @@ import {
   ChevronRight,
   FileText,
   Camera,
+  Download,
+  RefreshCw,
 } from "lucide-react";
 
 import "./Dashboard.css";
-import Documents from "../Documents";
 
 const API_URL =
   "https://df9aajz1zf.execute-api.ap-southeast-2.amazonaws.com";
@@ -255,6 +256,216 @@ async function deletePhotoFromS3(memberId) {
   await apiRequest("DELETE", "/photos", {
     memberId,
   });
+}
+
+// Document manager is defined in this file: no Documents.jsx required.
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const ALLOWED_EXTENSIONS = new Set([
+  "pdf", "jpg", "jpeg", "png", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+]);
+const DOCUMENT_TYPES = ["Identity", "Finance", "Diary", "Health", "Education", "Property", "Insurance", "Other"];
+
+async function documentsApi(method, path, body) {
+  const session = await fetchAuthSession();
+  const token = session.tokens?.idToken?.toString();
+  if (!token) throw new Error("Session expired. Please log in again.");
+
+  const response = await fetch(`${API_URL}${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+    },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || data.message || `Request failed (${response.status})`);
+  }
+  return data;
+}
+
+function formatSize(bytes) {
+  if (!Number.isFinite(Number(bytes))) return "Unknown size";
+  return `${(Number(bytes) / 1024).toFixed(1)} KB`;
+}
+
+function Documents({ memberId, memberName = "My Documents", onClose }) {
+  const [documents, setDocuments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [file, setFile] = useState(null);
+  const [documentType, setDocumentType] = useState("Identity");
+  const fileInputRef = useRef(null);
+  const mountedRef = useRef(true);
+
+  const loadDocuments = useCallback(async () => {
+    if (!memberId) return;
+    setLoading(true);
+    setError("");
+    try {
+      const result = await documentsApi("GET", `/documents?memberId=${encodeURIComponent(memberId)}`);
+      if (mountedRef.current) setDocuments(Array.isArray(result.documents) ? result.documents : []);
+    } catch (err) {
+      if (mountedRef.current) setError(err.message);
+    } finally {
+      if (mountedRef.current) setLoading(false);
+    }
+  }, [memberId]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    loadDocuments();
+    return () => { mountedRef.current = false; };
+  }, [loadDocuments]);
+
+  async function handleUpload(event) {
+    event.preventDefault();
+    if (!file || busy) return;
+    setError("");
+    setNotice("");
+    const extension = file.name.split(".").pop()?.toLowerCase();
+    if (!ALLOWED_EXTENSIONS.has(extension)) {
+      setError("Unsupported file type. Select PDF, JPG, PNG, Word, Excel, or PowerPoint.");
+      return;
+    }
+    if (file.size < 1 || file.size > MAX_FILE_SIZE) {
+      setError("The file must be larger than 0 bytes and no more than 10 MB.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const result = await documentsApi("POST", "/documents/upload-url", {
+        memberId, documentType, fileName: file.name, fileSize: file.size,
+      });
+      if (!result.uploadUrl || !result.fields || !result.documentId) {
+        throw new Error("AWS returned an incomplete upload response.");
+      }
+      const formData = new FormData();
+      Object.entries(result.fields).forEach(([key, value]) => formData.append(key, value));
+      formData.append("file", file);
+      const uploadResponse = await fetch(result.uploadUrl, { method: "POST", body: formData });
+      if (!uploadResponse.ok) {
+        throw new Error(`S3 upload failed (${uploadResponse.status}). Check the S3 bucket CORS configuration.`);
+      }
+      await documentsApi("POST", "/documents/confirm", { documentId: result.documentId });
+      setFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      setNotice("Document uploaded successfully.");
+      await loadDocuments();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDownload(document) {
+    setError("");
+    try {
+      const result = await documentsApi("GET", `/documents/view-url?documentId=${encodeURIComponent(document.documentId)}`);
+      if (!result.url) throw new Error("AWS did not return a download URL.");
+      // The Lambda sets Content-Disposition: attachment on the signed URL.
+      window.location.assign(result.url);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function handleRename(document) {
+    const newName = window.prompt("Document name:", document.fileName);
+    if (newName === null) return;
+    const cleaned = newName.trim();
+    if (!cleaned || cleaned.length > 200) {
+      setError("Document name must contain 1–200 characters.");
+      return;
+    }
+    if (cleaned === document.fileName) return;
+    setBusy(true);
+    setError("");
+    try {
+      await documentsApi("PATCH", "/documents", { documentId: document.documentId, fileName: cleaned });
+      await loadDocuments();
+      setNotice("Document renamed.");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDelete(document) {
+    if (!window.confirm(`Permanently delete “${document.fileName}”?`)) return;
+    setBusy(true);
+    setError("");
+    try {
+      await documentsApi("DELETE", "/documents", { documentId: document.documentId });
+      await loadDocuments();
+      setNotice("Document deleted.");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const grouped = documents.reduce((groups, document) => {
+    const key = document.documentType || "Other";
+    (groups[key] ||= []).push(document);
+    return groups;
+  }, {});
+
+  return (
+    <section className="documents-panel" aria-label={`${memberName} documents`}>
+      <div className="documents-header">
+        <div>
+          <h2>{memberName}'s Documents</h2>
+          <p>Securely stored in your private family vault</p>
+        </div>
+        <div className="documents-header-actions">
+          <button type="button" onClick={loadDocuments} disabled={loading || busy} aria-label="Refresh documents"><RefreshCw size={19} /></button>
+          {onClose && <button type="button" onClick={onClose} aria-label="Close documents"><X size={20} /></button>}
+        </div>
+      </div>
+
+      <form className="documents-upload" onSubmit={handleUpload}>
+        <label htmlFor="documents-file">Choose a document (up to 10 MB)</label>
+        <input id="documents-file" ref={fileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx,.ppt,.pptx" onChange={(event) => setFile(event.target.files?.[0] || null)} disabled={busy} />
+        <label htmlFor="documents-type">Document category</label>
+        <select id="documents-type" value={documentType} onChange={(event) => setDocumentType(event.target.value)} disabled={busy}>
+          {DOCUMENT_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+        </select>
+        <button type="submit" disabled={!file || busy}><Plus size={18} /> {busy ? "Please wait..." : "Upload Document"}</button>
+      </form>
+
+      {error && <p className="documents-error" role="alert">{error}</p>}
+      {notice && <p className="documents-notice" role="status">{notice}</p>}
+      {loading ? <p className="documents-empty">Loading documents...</p> : documents.length === 0 ? <p className="documents-empty">No documents uploaded for this family member yet.</p> : (
+        <div className="documents-groups">
+          {Object.entries(grouped).map(([type, items]) => (
+            <div className="documents-group" key={type}>
+              <h3>{type} ({items.length})</h3>
+              {items.map((document) => (
+                <div className="documents-item" key={document.documentId}>
+                  <FileText size={23} aria-hidden="true" />
+                  <div className="documents-item-info"><strong>{document.fileName}</strong><span>{formatSize(document.fileSize)}</span></div>
+                  <div className="documents-item-actions">
+                    <button type="button" onClick={() => handleDownload(document)} disabled={busy} title="Download" aria-label={`Download ${document.fileName}`}><Download size={18} /></button>
+                    <button type="button" onClick={() => handleRename(document)} disabled={busy} title="Rename" aria-label={`Rename ${document.fileName}`}><Pencil size={18} /></button>
+                    <button type="button" onClick={() => handleDelete(document)} disabled={busy} title="Delete" aria-label={`Delete ${document.fileName}`}><Trash2 size={18} /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
 }
 
 function Dashboard() {
