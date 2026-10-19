@@ -264,7 +264,47 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const ALLOWED_EXTENSIONS = new Set([
   "pdf", "jpg", "jpeg", "png", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
 ]);
-const DOCUMENT_TYPES = ["Identity", "Finance", "Diary", "Health", "Education", "Property", "Insurance", "Other"];
+const DOCUMENT_TYPES = [
+  // Identity & KYC
+  "Aadhaar Card",
+  "PAN Card",
+  "Passport",
+  "Voter ID Card (EPIC)",
+  "Driving Licence",
+
+  // Birth & Family
+  "Birth Certificate",
+  "Marriage Certificate",
+  "Death Certificate",
+  "Family Member Certificate",
+  "Legal Heir Certificate",
+
+  // Education
+  "10th Class Marksheet",
+  "12th Class Marksheet",
+  "Degree Certificate",
+  "Diploma Certificate",
+  "Transfer Certificate",
+
+  // Banking & Finance
+  "Bank Passbook",
+  "Bank Statement",
+  "Fixed Deposit Receipt",
+  "Loan Agreement",
+
+  // Property
+  "Property Sale Deed",
+  "Property Tax Receipt",
+  "Encumbrance Certificate",
+
+  // Health
+  "Medical Report",
+  "Medical Prescription",
+  "Health Insurance Policy",
+
+  // Other
+  "Other Document",
+]; 
 
 async function documentsApi(method, path, body) {
   const session = await fetchAuthSession();
