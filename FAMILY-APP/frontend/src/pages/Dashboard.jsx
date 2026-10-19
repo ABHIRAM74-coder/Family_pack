@@ -34,7 +34,7 @@ import {
 } from "lucide-react";
 
 import "./Dashboard.css";
-import Documents from "./Documents";
+import Documents from "../Documents";
 
 const API_URL =
   "https://df9aajz1zf.execute-api.ap-southeast-2.amazonaws.com";
