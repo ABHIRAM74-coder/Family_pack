@@ -405,10 +405,22 @@ function Documents({ memberId, memberName = "My Documents", onClose }) {
       });
       formData.append("file", file);
 
-      const uploadResponse = await fetch(result.uploadUrl, {
-        method: "POST",
-        body: formData,
-      });
+      const s3Hostname = new URL(result.uploadUrl).hostname;
+
+let uploadResponse;
+
+try {
+  uploadResponse = await fetch(result.uploadUrl, {
+    method: "POST",
+    body: formData,
+  });
+} catch (networkError) {
+  throw new Error(
+    `S3 endpoint: ${s3Hostname} | ` +
+    `File type: ${file.type || "unknown"} | ` +
+    `Network error: ${networkError.message}`
+  );
+}
 
       if (!uploadResponse.ok) {
         throw new Error(`S3 upload failed with HTTP ${uploadResponse.status}`);
