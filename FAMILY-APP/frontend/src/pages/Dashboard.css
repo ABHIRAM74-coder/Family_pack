@@ -1218,17 +1218,106 @@
   color: #857b99;
 }
 
-@media (max-width: 600px) {
-  .documents-panel {
-    padding: 18px;
-  }
+/* ===== DOCUMENT DROPDOWN IMPROVEMENTS ===== */
 
-  .documents-item {
-    flex-direction: column;
-    align-items: stretch;
-  }
+/* =========================================
+   FAMILY PACK - LIQUID METAL DROPDOWN
+   ========================================= */
 
-  .documents-item-actions {
-    width: 100%;
+/* ==========================================
+   FAMILY PACK - SMOOTH LIQUID METAL DROPDOWN
+   ========================================== */
+
+.documents-panel select {
+  width: 100%;
+  padding: 15px 44px 15px 18px;
+
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+
+  color: #37304d;
+
+  /* Smooth liquid silver */
+  background: linear-gradient(
+    120deg,
+    #ffffff 0%,
+    #f4f5f9 20%,
+    #e4e6ef 42%,
+    #dce0ea 55%,
+    #f0f1f8 78%,
+    #ffffff 100%
+  );
+
+  background-size: 200% 200%;
+  background-position: 0% 50%;
+
+  border: 1px solid rgba(210, 205, 230, 0.85);
+  border-radius: 16px;
+
+  box-shadow:
+    inset 0 1px 2px rgba(255, 255, 255, 0.95),
+    0 4px 14px rgba(105, 85, 145, 0.08);
+
+  cursor: pointer;
+  outline: none;
+
+  transition:
+    background-position 0.8s ease,
+    border-color 0.35s ease,
+    box-shadow 0.35s ease,
+    transform 0.35s ease;
+}
+
+/* Smooth flowing metallic reflection */
+
+.documents-panel select:hover {
+  background-position: 100% 50%;
+
+  border-color: rgba(167, 139, 250, 0.65);
+
+  box-shadow:
+    inset 0 1px 2px rgba(255, 255, 255, 0.95),
+    0 6px 20px rgba(130, 105, 185, 0.15);
+
+  transform: translateY(-1px);
+}
+
+/* Soft purple glow on focus */
+
+.documents-panel select:focus {
+  background-position: 70% 50%;
+
+  border-color: #b8a1ed;
+
+  box-shadow:
+    0 0 0 3px rgba(167, 139, 250, 0.12),
+    0 6px 20px rgba(125, 95, 190, 0.12);
+}
+
+/* Dropdown list options */
+
+.documents-panel select option {
+  background: #f4f4f9;
+  color: #37304d;
+  font-size: 14px;
+  font-weight: 500;
+  padding: 10px;
+}
+
+/* Disabled state */
+
+.documents-panel select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Accessibility */
+
+@media (prefers-reduced-motion: reduce) {
+  .documents-panel select {
+    transition: none;
   }
-} 
+}
