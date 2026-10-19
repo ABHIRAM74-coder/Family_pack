@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 
 import "./Dashboard.css";
+import Documents from "./Documents";
 
 const API_URL =
   "https://df9aajz1zf.execute-api.ap-southeast-2.amazonaws.com";
@@ -282,6 +283,14 @@ function Dashboard() {
   const [myPhoto, setMyPhoto] = useState("");
 
   const [showAddModal, setShowAddModal] = useState(false);
+
+  // Documents are independent of existing family profile editing.
+  const [documentMember, setDocumentMember] = useState(null);
+
+  const openMemberDocuments = (memberId, name) => {
+    setShowAddModal(false);
+    setDocumentMember({ memberId, name });
+  };
   const [editingId, setEditingId] = useState(null);
   const [editingSelf, setEditingSelf] = useState(false);
 
@@ -1732,6 +1741,53 @@ function Dashboard() {
                   </button>
                 )}
             </form>
+
+            {/* ADDED: Open documents without changing profile edit/save behavior */}
+            {(editingSelf || editingId) && (
+              <button
+                type="button"
+                className="family-save-button"
+                style={{ marginTop: "12px" }}
+                onClick={() =>
+                  openMemberDocuments(
+                    editingSelf ? "me" : editingId,
+                    editingSelf ? (user.name || "My") : (memberName || "Family member")
+                  )
+                }
+                disabled={saving || processingPhoto}
+              >
+                <FileText size={18} />
+                Manage Documents
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ADDED: Document manager modal; original dashboard remains intact */}
+      {documentMember && (
+        <div
+          className="family-modal-overlay"
+          onClick={() => setDocumentMember(null)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Manage family documents"
+            onClick={(event) => event.stopPropagation()}
+            style={{
+              width: "min(96vw, 760px)",
+              maxHeight: "90vh",
+              overflowY: "auto",
+              borderRadius: "24px",
+              background: "white",
+            }}
+          >
+            <Documents
+              memberId={documentMember.memberId}
+              memberName={documentMember.name}
+              onClose={() => setDocumentMember(null)}
+            />
           </div>
         </div>
       )}
