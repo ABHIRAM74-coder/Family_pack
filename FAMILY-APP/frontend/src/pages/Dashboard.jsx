@@ -40,7 +40,7 @@ import "./Dashboard.css";
 const API_URL =
   "https://df9aajz1zf.execute-api.ap-southeast-2.amazonaws.com";
 
-const INACTIVITY_LIMIT = 60 * 1000;
+const INACTIVITY_LIMIT = 10* 60 * 1000;
 
 const RELATIONSHIPS = [
   "Mother",
