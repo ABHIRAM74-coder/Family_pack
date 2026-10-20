@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   useNavigate,
   useLocation,
@@ -23,11 +23,26 @@ function Login() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // NEW: Controls the logo color transition.
+  const [loginSuccess, setLoginSuccess] = useState(false);
+
   const successMessage = location.state?.message;
+
+  // NEW: Preload both logos to reduce animation flickering.
+  useEffect(() => {
+    const purpleLogo = new Image();
+    purpleLogo.src = "/Familylogo.jpeg";
+
+    const tealLogo = new Image();
+    tealLogo.src = "/Familylogo1.jpeg";
+  }, []);
 
   const handleLogin = async (e) => {
     e.preventDefault();
     setError("");
+
+    // Reset logo to purple before authentication.
+    setLoginSuccess(false);
 
     const normalizedEmail = email.trim().toLowerCase();
 
@@ -79,6 +94,14 @@ function Login() {
           name: attributes.name,
         });
 
+        // NEW: Start smooth purple-to-teal logo transition.
+        setLoginSuccess(true);
+
+        // NEW: Allow animation to finish before navigation.
+        await new Promise((resolve) => {
+          setTimeout(resolve, 1300);
+        });
+
         // Open the dashboard for the authenticated account.
         navigate("/dashboard", {
           replace: true,
@@ -101,6 +124,9 @@ function Login() {
       }
     } catch (err) {
       console.error("Login error:", err);
+
+      // Reset logo if authentication fails.
+      setLoginSuccess(false);
 
       if (err.name === "UserNotConfirmedException") {
         navigate("/verify-otp", {
@@ -125,6 +151,57 @@ function Login() {
         className="auth-card"
         onSubmit={handleLogin}
       >
+
+        {/* NEW: ANIMATED FAMILYKIT LOGO */}
+        <div
+          className="familykit-login-logo"
+          style={{
+            position: "relative",
+            width: "200px",
+            height: "200px",
+            maxWidth: "100%",
+            margin: "0 auto 20px",
+            overflow: "hidden",
+            borderRadius: "16px",
+          }}
+        >
+          {/* Purple logo before login */}
+          <img
+            src="/Familylogo.jpeg"
+            alt="FamilyKit Logo"
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: "100%",
+              height: "100%",
+              objectFit: "contain",
+              borderRadius: "16px",
+              opacity: loginSuccess ? 0 : 1,
+              transition: "opacity 1s ease-in-out",
+            }}
+          />
+
+          {/* Teal logo after successful login */}
+          <img
+            src="/Familylogo1.jpeg"
+            alt=""
+            aria-hidden="true"
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: "100%",
+              height: "100%",
+              objectFit: "contain",
+              borderRadius: "16px",
+              opacity: loginSuccess ? 1 : 0,
+              transition: "opacity 1s ease-in-out",
+            }}
+          />
+        </div>
+        {/* END: ANIMATED FAMILYKIT LOGO */}
+
         <h1>Family App</h1>
         <h2>Welcome Back</h2>
 
@@ -164,9 +241,7 @@ function Login() {
 
         <input
           id="password"
-          type={
-            showPassword ? "text" : "password"
-          }
+          type={showPassword ? "text" : "password"}
           placeholder="Enter your password"
           autoComplete="current-password"
           value={password}
