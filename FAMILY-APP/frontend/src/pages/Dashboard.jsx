@@ -406,6 +406,7 @@ function formatSize(bytes) {
 function Documents({
   memberId,
   memberName = "My Documents",
+  isHomeUpload = false,
   onClose,
 }) {
   const [documents, setDocuments] = useState([]);
@@ -716,11 +717,11 @@ function Documents({
   return (
     <section
       className="documents-panel"
-      aria-label={`${memberName} documents`}
+      aria-label={isHomeUpload ? "Upload Documents" : `${memberName} documents`}
     >
       <div className="documents-header">
         <div>
-          <h2>{memberName}'s Documents</h2>
+          <h2>{isHomeUpload ? "Upload Documents" : `${memberName}'s Documents`}</h2>
           <p>
             Securely stored in your private family vault
           </p>
@@ -971,10 +972,12 @@ function Dashboard() {
   // =====================================================
 
   const openHomeDocuments = () => {
-    openMemberDocuments(
-      "me",
-      user?.name || "My"
-    );
+    setShowAddModal(false);
+    setDocumentMember({
+      memberId: "me",
+      name: user?.name || "My",
+      isHomeUpload: true,
+    });
   };
 
   // =====================================================
@@ -2755,6 +2758,7 @@ function Dashboard() {
               memberName={
                 documentMember.name
               }
+              isHomeUpload={documentMember.isHomeUpload === true}
               onClose={() =>
                 setDocumentMember(null)
               }
