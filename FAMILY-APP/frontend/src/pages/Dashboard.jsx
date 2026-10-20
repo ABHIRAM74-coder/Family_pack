@@ -12,8 +12,7 @@ import {
 import {
   CalendarDays,
   Bell,
-  Search,
-  Mic,
+  UploadCloud,
   Plus,
   Pencil,
   Fingerprint,
@@ -40,7 +39,7 @@ import "./Dashboard.css";
 const API_URL =
   "https://df9aajz1zf.execute-api.ap-southeast-2.amazonaws.com";
 
-const INACTIVITY_LIMIT = 10* 60 * 1000;
+const INACTIVITY_LIMIT = 10 * 60 * 1000;
 
 const RELATIONSHIPS = [
   "Mother",
@@ -65,7 +64,10 @@ const CATEGORIES = [
   { name: "Health", icon: HeartPulse, color: "#d84b72" },
 ];
 
-// Cognito authentication token
+// =====================================================
+// AUTHENTICATION
+// =====================================================
+
 async function getAuthToken() {
   const session = await fetchAuthSession();
 
@@ -80,7 +82,10 @@ async function getAuthToken() {
   return token;
 }
 
-// Authenticated API Gateway request
+// =====================================================
+// AUTHENTICATED API GATEWAY REQUEST
+// =====================================================
+
 async function apiRequest(method, path, body) {
   const token = await getAuthToken();
 
@@ -107,7 +112,10 @@ async function apiRequest(method, path, body) {
   return result;
 }
 
-// Compress photo before uploading
+// =====================================================
+// PROFILE PHOTO PROCESSING
+// =====================================================
+
 function processProfilePhoto(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -148,6 +156,7 @@ function processProfilePhoto(file) {
         }
 
         context.fillStyle = "#ffffff";
+
         context.fillRect(
           0,
           0,
@@ -173,7 +182,10 @@ function processProfilePhoto(file) {
   });
 }
 
-// Convert JPEG data URL into Blob
+// =====================================================
+// CONVERT PHOTO DATA URL TO BLOB
+// =====================================================
+
 function dataUrlToBlob(dataUrl) {
   const [header, encoded] = dataUrl.split(",");
 
@@ -196,7 +208,10 @@ function dataUrlToBlob(dataUrl) {
   });
 }
 
-// Upload profile photo to private S3 bucket
+// =====================================================
+// UPLOAD PROFILE PHOTO TO S3
+// =====================================================
+
 async function uploadPhotoToS3(memberId, photoDataUrl) {
   const { uploadUrl } = await apiRequest(
     "POST",
@@ -228,7 +243,10 @@ async function uploadPhotoToS3(memberId, photoDataUrl) {
   }
 }
 
-// Get temporary photo viewing URL
+// =====================================================
+// GET PROFILE PHOTO VIEWING URL
+// =====================================================
+
 async function getPhotoUrl(memberId) {
   try {
     const result = await apiRequest(
@@ -251,19 +269,45 @@ async function getPhotoUrl(memberId) {
   }
 }
 
-// Delete profile photo from S3
+// =====================================================
+// DELETE PROFILE PHOTO
+// =====================================================
+
 async function deletePhotoFromS3(memberId) {
   await apiRequest("DELETE", "/photos", {
     memberId,
   });
 }
 
-// Document manager is defined in this file: no Documents.jsx required.
+// =====================================================
+// DOCUMENT MANAGEMENT
+//
+// EXISTING FUNCTIONALITY PRESERVED
+//
+// Family profile:
+//   memberId = selected family member's ID
+//
+// Home upload:
+//   memberId = "me"
+//
+// Both use the same secure AWS backend.
+// =====================================================
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
+
 const ALLOWED_EXTENSIONS = new Set([
-  "pdf", "jpg", "jpeg", "png", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+  "pdf",
+  "jpg",
+  "jpeg",
+  "png",
+  "doc",
+  "docx",
+  "xls",
+  "xlsx",
+  "ppt",
+  "pptx",
 ]);
+
 const DOCUMENT_TYPES = [
   // Identity & KYC
   "Aadhaar Card",
@@ -304,63 +348,126 @@ const DOCUMENT_TYPES = [
 
   // Other
   "Other Document",
-]; 
+];
+
+// =====================================================
+// DOCUMENT API
+// =====================================================
 
 async function documentsApi(method, path, body) {
   const session = await fetchAuthSession();
+
   const token = session.tokens?.idToken?.toString();
-  if (!token) throw new Error("Session expired. Please log in again.");
+
+  if (!token) {
+    throw new Error("Session expired. Please log in again.");
+  }
 
   const response = await fetch(`${API_URL}${path}`, {
     method,
     headers: {
       Authorization: `Bearer ${token}`,
-      ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+      ...(body !== undefined
+        ? { "Content-Type": "application/json" }
+        : {}),
     },
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    ...(body !== undefined
+      ? { body: JSON.stringify(body) }
+      : {}),
   });
+
   const data = await response.json().catch(() => ({}));
+
   if (!response.ok) {
-    throw new Error(data.error || data.message || `Request failed (${response.status})`);
+    throw new Error(
+      data.error ||
+        data.message ||
+        `Request failed (${response.status})`
+    );
   }
+
   return data;
 }
 
 function formatSize(bytes) {
-  if (!Number.isFinite(Number(bytes))) return "Unknown size";
+  if (!Number.isFinite(Number(bytes))) {
+    return "Unknown size";
+  }
+
   return `${(Number(bytes) / 1024).toFixed(1)} KB`;
 }
 
-function Documents({ memberId, memberName = "My Documents", onClose }) {
+// =====================================================
+// DOCUMENTS COMPONENT
+//
+// REUSED BY BOTH UPLOAD METHODS
+// =====================================================
+
+function Documents({
+  memberId,
+  memberName = "My Documents",
+  onClose,
+}) {
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [file, setFile] = useState(null);
-  const [documentType, setDocumentType] = useState("Aadhaar Card");
+
+  const [documentType, setDocumentType] =
+    useState("Aadhaar Card");
+
   const fileInputRef = useRef(null);
   const mountedRef = useRef(true);
 
+  // =====================================================
+  // LOAD DOCUMENTS
+  // =====================================================
+
   const loadDocuments = useCallback(async () => {
     if (!memberId) return;
+
     setLoading(true);
     setError("");
+
     try {
-      const result = await documentsApi("GET", `/documents?memberId=${encodeURIComponent(memberId)}`);
-      if (mountedRef.current) setDocuments(Array.isArray(result.documents) ? result.documents : []);
+      const result = await documentsApi(
+        "GET",
+        `/documents?memberId=${encodeURIComponent(memberId)}`
+      );
+
+      if (mountedRef.current) {
+        setDocuments(
+          Array.isArray(result.documents)
+            ? result.documents
+            : []
+        );
+      }
     } catch (err) {
-      if (mountedRef.current) setError(err.message);
+      if (mountedRef.current) {
+        setError(err.message);
+      }
     } finally {
-      if (mountedRef.current) setLoading(false);
+      if (mountedRef.current) {
+        setLoading(false);
+      }
     }
   }, [memberId]);
 
   useEffect(() => {
     mountedRef.current = true;
+
     loadDocuments();
-    return () => { mountedRef.current = false; };
+
+    return () => {
+      mountedRef.current = false;
+    };
   }, [loadDocuments]);
+
+  // =====================================================
+  // UPLOAD DOCUMENT
+  // =====================================================
 
   async function handleUpload(event) {
     event.preventDefault();
@@ -370,73 +477,114 @@ function Documents({ memberId, memberName = "My Documents", onClose }) {
     setError("");
     setNotice("");
 
-    const extension = file.name.split(".").pop()?.toLowerCase();
+    const extension = file.name
+      .split(".")
+      .pop()
+      ?.toLowerCase();
 
     if (!ALLOWED_EXTENSIONS.has(extension)) {
-      setError("Unsupported file type. Select PDF, JPG, PNG, Word, Excel, or PowerPoint.");
+      setError(
+        "Unsupported file type. Select PDF, JPG, PNG, Word, Excel, or PowerPoint."
+      );
       return;
     }
 
     if (file.size < 1 || file.size > MAX_FILE_SIZE) {
-      setError("The file must be larger than 0 bytes and no more than 10 MB.");
+      setError(
+        "The file must be larger than 0 bytes and no more than 10 MB."
+      );
       return;
     }
 
     setBusy(true);
-    let uploadStage = "Stage 1: Requesting S3 upload URL";
+
+    let uploadStage =
+      "Stage 1: Requesting S3 upload URL";
 
     try {
-      const result = await documentsApi("POST", "/documents/upload-url", {
-        memberId,
-        documentType,
-        fileName: file.name,
-        fileSize: file.size,
-      });
+      // IMPORTANT:
+      // The memberId comes from the selected upload route.
+      //
+      // Home -> "me"
+      // Family profile -> selected family member ID
 
-      if (!result.uploadUrl || !result.fields || !result.documentId) {
-        throw new Error("AWS returned an incomplete upload response.");
+      const result = await documentsApi(
+        "POST",
+        "/documents/upload-url",
+        {
+          memberId,
+          documentType,
+          fileName: file.name,
+          fileSize: file.size,
+        }
+      );
+
+      if (
+        !result.uploadUrl ||
+        !result.fields ||
+        !result.documentId
+      ) {
+        throw new Error(
+          "AWS returned an incomplete upload response."
+        );
       }
 
       uploadStage = "Stage 2: Uploading file to S3";
 
       const formData = new FormData();
-      Object.entries(result.fields).forEach(([key, value]) => {
-        formData.append(key, value);
-      });
+
+      Object.entries(result.fields).forEach(
+        ([key, value]) => {
+          formData.append(key, value);
+        }
+      );
+
       formData.append("file", file);
 
-      const s3Hostname = new URL(result.uploadUrl).hostname;
+      const s3Hostname = new URL(
+        result.uploadUrl
+      ).hostname;
 
-let uploadResponse;
+      let uploadResponse;
 
-try {
-  uploadResponse = await fetch(result.uploadUrl, {
-    method: "POST",
-    body: formData,
-  });
-} catch (networkError) {
-  throw new Error(
-    `S3 endpoint: ${s3Hostname} | ` +
-    `File type: ${file.type || "unknown"} | ` +
-    `Network error: ${networkError.message}`
-  );
-}
-
-      if (!uploadResponse.ok) {
-        throw new Error(`S3 upload failed with HTTP ${uploadResponse.status}`);
+      try {
+        uploadResponse = await fetch(result.uploadUrl, {
+          method: "POST",
+          body: formData,
+        });
+      } catch (networkError) {
+        throw new Error(
+          `S3 endpoint: ${s3Hostname} | ` +
+            `File type: ${file.type || "unknown"} | ` +
+            `Network error: ${networkError.message}`
+        );
       }
 
-      uploadStage = "Stage 3: Confirming document upload";
-      await documentsApi("POST", "/documents/confirm", {
-        documentId: result.documentId,
-      });
+      if (!uploadResponse.ok) {
+        throw new Error(
+          `S3 upload failed with HTTP ${uploadResponse.status}`
+        );
+      }
+
+      uploadStage =
+        "Stage 3: Confirming document upload";
+
+      await documentsApi(
+        "POST",
+        "/documents/confirm",
+        {
+          documentId: result.documentId,
+        }
+      );
 
       setFile(null);
+
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
 
       setNotice("Document uploaded successfully.");
+
       await loadDocuments();
     } catch (err) {
       setError(`${uploadStage} — ${err.message}`);
@@ -445,32 +593,67 @@ try {
     }
   }
 
+  // =====================================================
+  // DOWNLOAD DOCUMENT
+  // =====================================================
+
   async function handleDownload(document) {
     setError("");
+
     try {
-      const result = await documentsApi("GET", `/documents/view-url?documentId=${encodeURIComponent(document.documentId)}`);
-      if (!result.url) throw new Error("AWS did not return a download URL.");
-      // The Lambda sets Content-Disposition: attachment on the signed URL.
+      const result = await documentsApi(
+        "GET",
+        `/documents/view-url?documentId=${encodeURIComponent(
+          document.documentId
+        )}`
+      );
+
+      if (!result.url) {
+        throw new Error(
+          "AWS did not return a download URL."
+        );
+      }
+
       window.location.assign(result.url);
     } catch (err) {
       setError(err.message);
     }
   }
 
+  // =====================================================
+  // RENAME DOCUMENT
+  // =====================================================
+
   async function handleRename(document) {
-    const newName = window.prompt("Document name:", document.fileName);
+    const newName = window.prompt(
+      "Document name:",
+      document.fileName
+    );
+
     if (newName === null) return;
+
     const cleaned = newName.trim();
+
     if (!cleaned || cleaned.length > 200) {
-      setError("Document name must contain 1–200 characters.");
+      setError(
+        "Document name must contain 1–200 characters."
+      );
       return;
     }
+
     if (cleaned === document.fileName) return;
+
     setBusy(true);
     setError("");
+
     try {
-      await documentsApi("PATCH", "/documents", { documentId: document.documentId, fileName: cleaned });
+      await documentsApi("PATCH", "/documents", {
+        documentId: document.documentId,
+        fileName: cleaned,
+      });
+
       await loadDocuments();
+
       setNotice("Document renamed.");
     } catch (err) {
       setError(err.message);
@@ -479,13 +662,29 @@ try {
     }
   }
 
+  // =====================================================
+  // DELETE DOCUMENT
+  // =====================================================
+
   async function handleDelete(document) {
-    if (!window.confirm(`Permanently delete “${document.fileName}”?`)) return;
+    if (
+      !window.confirm(
+        `Permanently delete “${document.fileName}”?`
+      )
+    ) {
+      return;
+    }
+
     setBusy(true);
     setError("");
+
     try {
-      await documentsApi("DELETE", "/documents", { documentId: document.documentId });
+      await documentsApi("DELETE", "/documents", {
+        documentId: document.documentId,
+      });
+
       await loadDocuments();
+
       setNotice("Document deleted.");
     } catch (err) {
       setError(err.message);
@@ -494,60 +693,222 @@ try {
     }
   }
 
-  const grouped = documents.reduce((groups, document) => {
-    const key = document.documentType || "Other";
-    (groups[key] ||= []).push(document);
-    return groups;
-  }, {});
+  // =====================================================
+  // GROUP DOCUMENTS BY CATEGORY
+  // =====================================================
+
+  const grouped = documents.reduce(
+    (groups, document) => {
+      const key =
+        document.documentType || "Other";
+
+      (groups[key] ||= []).push(document);
+
+      return groups;
+    },
+    {}
+  );
+
+  // =====================================================
+  // DOCUMENT MANAGER UI
+  // =====================================================
 
   return (
-    <section className="documents-panel" aria-label={`${memberName} documents`}>
+    <section
+      className="documents-panel"
+      aria-label={`${memberName} documents`}
+    >
       <div className="documents-header">
         <div>
           <h2>{memberName}'s Documents</h2>
-          <p>Securely stored in your private family vault</p>
+          <p>
+            Securely stored in your private family vault
+          </p>
         </div>
+
         <div className="documents-header-actions">
-          <button type="button" onClick={loadDocuments} disabled={loading || busy} aria-label="Refresh documents"><RefreshCw size={19} /></button>
-          {onClose && <button type="button" onClick={onClose} aria-label="Close documents"><X size={20} /></button>}
+          <button
+            type="button"
+            onClick={loadDocuments}
+            disabled={loading || busy}
+            aria-label="Refresh documents"
+          >
+            <RefreshCw size={19} />
+          </button>
+
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close documents"
+            >
+              <X size={20} />
+            </button>
+          )}
         </div>
       </div>
 
-      <form className="documents-upload" onSubmit={handleUpload}>
-        <label htmlFor="documents-file">Choose a document (up to 10 MB)</label>
-        <input id="documents-file" ref={fileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx,.ppt,.pptx" onChange={(event) => setFile(event.target.files?.[0] || null)} disabled={busy} />
-        <label htmlFor="documents-type">Document category</label>
-        <select id="documents-type" value={documentType} onChange={(event) => setDocumentType(event.target.value)} disabled={busy}>
-          {DOCUMENT_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+      <form
+        className="documents-upload"
+        onSubmit={handleUpload}
+      >
+        <label htmlFor="documents-file">
+          Choose a document (up to 10 MB)
+        </label>
+
+        <input
+          id="documents-file"
+          ref={fileInputRef}
+          type="file"
+          accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
+          onChange={(event) =>
+            setFile(event.target.files?.[0] || null)
+          }
+          disabled={busy}
+        />
+
+        <label htmlFor="documents-type">
+          Document category
+        </label>
+
+        <select
+          id="documents-type"
+          value={documentType}
+          onChange={(event) =>
+            setDocumentType(event.target.value)
+          }
+          disabled={busy}
+        >
+          {DOCUMENT_TYPES.map((type) => (
+            <option key={type} value={type}>
+              {type}
+            </option>
+          ))}
         </select>
-        <button type="submit" disabled={!file || busy}><Plus size={18} /> {busy ? "Please wait..." : "Upload Document"}</button>
+
+        <button
+          type="submit"
+          disabled={!file || busy}
+        >
+          <Plus size={18} />
+
+          {busy
+            ? "Please wait..."
+            : "Upload Document"}
+        </button>
       </form>
 
-      {error && <p className="documents-error" role="alert">{error}</p>}
-      {notice && <p className="documents-notice" role="status">{notice}</p>}
-      {loading ? <p className="documents-empty">Loading documents...</p> : documents.length === 0 ? <p className="documents-empty">No documents uploaded for this family member yet.</p> : (
+      {error && (
+        <p
+          className="documents-error"
+          role="alert"
+        >
+          {error}
+        </p>
+      )}
+
+      {notice && (
+        <p
+          className="documents-notice"
+          role="status"
+        >
+          {notice}
+        </p>
+      )}
+
+      {loading ? (
+        <p className="documents-empty">
+          Loading documents...
+        </p>
+      ) : documents.length === 0 ? (
+        <p className="documents-empty">
+          No documents uploaded for this family member yet.
+        </p>
+      ) : (
         <div className="documents-groups">
-          {Object.entries(grouped).map(([type, items]) => (
-            <div className="documents-group" key={type}>
-              <h3>{type} ({items.length})</h3>
-              {items.map((document) => (
-                <div className="documents-item" key={document.documentId}>
-                  <FileText size={23} aria-hidden="true" />
-                  <div className="documents-item-info"><strong>{document.fileName}</strong><span>{formatSize(document.fileSize)}</span></div>
-                  <div className="documents-item-actions">
-                    <button type="button" onClick={() => handleDownload(document)} disabled={busy} title="Download" aria-label={`Download ${document.fileName}`}><Download size={18} /></button>
-                    <button type="button" onClick={() => handleRename(document)} disabled={busy} title="Rename" aria-label={`Rename ${document.fileName}`}><Pencil size={18} /></button>
-                    <button type="button" onClick={() => handleDelete(document)} disabled={busy} title="Delete" aria-label={`Delete ${document.fileName}`}><Trash2 size={18} /></button>
+          {Object.entries(grouped).map(
+            ([type, items]) => (
+              <div
+                className="documents-group"
+                key={type}
+              >
+                <h3>
+                  {type} ({items.length})
+                </h3>
+
+                {items.map((document) => (
+                  <div
+                    className="documents-item"
+                    key={document.documentId}
+                  >
+                    <FileText
+                      size={23}
+                      aria-hidden="true"
+                    />
+
+                    <div className="documents-item-info">
+                      <strong>
+                        {document.fileName}
+                      </strong>
+
+                      <span>
+                        {formatSize(
+                          document.fileSize
+                        )}
+                      </span>
+                    </div>
+
+                    <div className="documents-item-actions">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleDownload(document)
+                        }
+                        disabled={busy}
+                        title="Download"
+                        aria-label={`Download ${document.fileName}`}
+                      >
+                        <Download size={18} />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleRename(document)
+                        }
+                        disabled={busy}
+                        title="Rename"
+                        aria-label={`Rename ${document.fileName}`}
+                      >
+                        <Pencil size={18} />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleDelete(document)
+                        }
+                        disabled={busy}
+                        title="Delete"
+                        aria-label={`Delete ${document.fileName}`}
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          ))}
+                ))}
+              </div>
+            )
+          )}
         </div>
       )}
     </section>
   );
 }
+
+// =====================================================
+// MAIN DASHBOARD COMPONENT
+// =====================================================
 
 function Dashboard() {
   const navigate = useNavigate();
@@ -561,52 +922,101 @@ function Dashboard() {
   const [loggingOut, setLoggingOut] = useState(false);
 
   const [members, setMembers] = useState([]);
-  const [loadingMembers, setLoadingMembers] = useState(false);
-
-  // NEW: Track initial AWS loading for Add Member spinner
-  const [initialMembersReady, setInitialMembersReady] =
+  const [loadingMembers, setLoadingMembers] =
     useState(false);
 
-  const [initialPhotoReady, setInitialPhotoReady] =
-    useState(false);
+  const [
+    initialMembersReady,
+    setInitialMembersReady,
+  ] = useState(false);
+
+  const [
+    initialPhotoReady,
+    setInitialPhotoReady,
+  ] = useState(false);
 
   const [membersError, setMembersError] = useState("");
-
   const [myPhoto, setMyPhoto] = useState("");
 
-  const [showAddModal, setShowAddModal] = useState(false);
+  const [showAddModal, setShowAddModal] =
+    useState(false);
 
-  // Documents are independent of existing family profile editing.
-  const [documentMember, setDocumentMember] = useState(null);
+  // =====================================================
+  // EXISTING DOCUMENT MANAGER STATE
+  // =====================================================
+
+  const [documentMember, setDocumentMember] =
+    useState(null);
+
+  // Existing functionality:
+  // Open document manager for any family member.
 
   const openMemberDocuments = (memberId, name) => {
     setShowAddModal(false);
-    setDocumentMember({ memberId, name });
+
+    setDocumentMember({
+      memberId,
+      name,
+    });
   };
+
+  // =====================================================
+  // NEW FEATURE: HOME SCREEN DOCUMENT UPLOAD
+  //
+  // Always opens the authenticated user's documents.
+  //
+  // "me" is the primary account holder's profile.
+  //
+  // Existing family member uploads are not affected.
+  // =====================================================
+
+  const openHomeDocuments = () => {
+    openMemberDocuments(
+      "me",
+      user?.name || "My"
+    );
+  };
+
+  // =====================================================
+  // PROFILE EDITING STATE
+  // =====================================================
+
   const [editingId, setEditingId] = useState(null);
-  const [editingSelf, setEditingSelf] = useState(false);
+  const [editingSelf, setEditingSelf] =
+    useState(false);
 
   const [memberName, setMemberName] = useState("");
-  const [relationship, setRelationship] = useState("");
-  const [memberPhoto, setMemberPhoto] = useState("");
-  const [photoChanged, setPhotoChanged] = useState(false);
+  const [relationship, setRelationship] =
+    useState("");
 
-  const [processingPhoto, setProcessingPhoto] =
+  const [memberPhoto, setMemberPhoto] =
+    useState("");
+
+  const [photoChanged, setPhotoChanged] =
     useState(false);
+
+  const [
+    processingPhoto,
+    setProcessingPhoto,
+  ] = useState(false);
 
   const [saving, setSaving] = useState(false);
 
-  const [activeTab, setActiveTab] = useState("Home");
-  const [search, setSearch] = useState("");
+  const [activeTab, setActiveTab] =
+    useState("Home");
+
   const [error, setError] = useState("");
-  const [logoutError, setLogoutError] = useState("");
+  const [logoutError, setLogoutError] =
+    useState("");
 
-  const [photoRefresh, setPhotoRefresh] = useState(0);
+  const [photoRefresh, setPhotoRefresh] =
+    useState(0);
 
-  const [sessionTimedOut, setSessionTimedOut] =
-    useState(false);
+  const [
+    sessionTimedOut,
+    setSessionTimedOut,
+  ] = useState(false);
 
-  // NEW: True only while the initial AWS member request is pending
   const familyLoading = !initialMembersReady;
 
   const myPhotoKey = user
@@ -629,14 +1039,20 @@ function Dashboard() {
     }
   };
 
-  // Load Cognito user
+  // =====================================================
+  // LOAD COGNITO USER
+  // =====================================================
+
   useEffect(() => {
     let active = true;
 
     async function loadUser() {
       try {
-        const currentUser = await getCurrentUser();
-        const attributes = await fetchUserAttributes();
+        const currentUser =
+          await getCurrentUser();
+
+        const attributes =
+          await fetchUserAttributes();
 
         if (!active) return;
 
@@ -649,10 +1065,15 @@ function Dashboard() {
           email: attributes.email || "",
         });
       } catch (err) {
-        console.error("Authentication error:", err);
+        console.error(
+          "Authentication error:",
+          err
+        );
 
         if (active) {
-          navigate("/login", { replace: true });
+          navigate("/login", {
+            replace: true,
+          });
         }
       } finally {
         if (active) {
@@ -669,10 +1090,15 @@ function Dashboard() {
   }, [navigate]);
 
   // =====================================================
-  // 1-MINUTE INACTIVITY SESSION TIMEOUT
+  // INACTIVITY SESSION TIMEOUT
   // =====================================================
+
   useEffect(() => {
-    if (!user || loggingOut || sessionTimedOut) {
+    if (
+      !user ||
+      loggingOut ||
+      sessionTimedOut
+    ) {
       return;
     }
 
@@ -729,7 +1155,8 @@ function Dashboard() {
     const checkInactivity = () => {
       if (expired) return;
 
-      const elapsed = Date.now() - lastActivity;
+      const elapsed =
+        Date.now() - lastActivity;
 
       if (elapsed >= INACTIVITY_LIMIT) {
         expireSession();
@@ -818,14 +1245,24 @@ function Dashboard() {
         checkInactivity
       );
     };
-  }, [user?.id, loggingOut, sessionTimedOut, navigate]);
+  }, [
+    user?.id,
+    loggingOut,
+    sessionTimedOut,
+    navigate,
+  ]);
 
-  // Refresh signed S3 URLs before expiration
+  // =====================================================
+  // REFRESH SIGNED S3 PHOTO URLS
+  // =====================================================
+
   useEffect(() => {
     if (!user) return;
 
     const interval = setInterval(() => {
-      setPhotoRefresh((value) => value + 1);
+      setPhotoRefresh(
+        (value) => value + 1
+      );
     }, 4 * 60 * 1000);
 
     return () => clearInterval(interval);
@@ -833,13 +1270,15 @@ function Dashboard() {
 
   // =====================================================
   // LOAD FAMILY MEMBERS FROM DYNAMODB
-  // NEW: Add Member spinner remains visible until done
   // =====================================================
+
   useEffect(() => {
     if (!user) return;
 
     let active = true;
-    const version = ++photoVersionRef.current;
+
+    const version =
+      ++photoVersionRef.current;
 
     async function loadMembers() {
       setLoadingMembers(true);
@@ -853,29 +1292,41 @@ function Dashboard() {
 
         if (!active) return;
 
-        const storedPhotos = getMemberPhotos();
+        const storedPhotos =
+          getMemberPhotos();
 
-        const loadedMembers = Array.isArray(result.members)
-          ? result.members.map((member) => ({
-              ...member,
-              id: member.memberId,
-              photo:
-                storedPhotos[member.memberId] || "",
-            }))
-          : [];
+        const loadedMembers =
+          Array.isArray(result.members)
+            ? result.members.map(
+                (member) => ({
+                  ...member,
+                  id: member.memberId,
+                  photo:
+                    storedPhotos[
+                      member.memberId
+                    ] || "",
+                })
+              )
+            : [];
 
         setMembers(loadedMembers);
 
-        const photoResults = await Promise.allSettled(
-          loadedMembers.map(async (member) => ({
-            id: member.id,
-            url: await getPhotoUrl(member.id),
-          }))
-        );
+        const photoResults =
+          await Promise.allSettled(
+            loadedMembers.map(
+              async (member) => ({
+                id: member.id,
+                url: await getPhotoUrl(
+                  member.id
+                ),
+              })
+            )
+          );
 
         if (
           !active ||
-          version !== photoVersionRef.current
+          version !==
+            photoVersionRef.current
         ) {
           return;
         }
@@ -883,9 +1334,13 @@ function Dashboard() {
         const photoMap = {};
 
         photoResults.forEach((result) => {
-          if (result.status === "fulfilled") {
-            photoMap[result.value.id] =
-              result.value.url;
+          if (
+            result.status ===
+            "fulfilled"
+          ) {
+            photoMap[
+              result.value.id
+            ] = result.value.url;
           } else {
             console.error(
               "Unable to retrieve family photo:",
@@ -898,15 +1353,21 @@ function Dashboard() {
           previous.map((member) => ({
             ...member,
             photo:
-              photoMap[member.id] !== undefined
+              photoMap[member.id] !==
+              undefined
                 ? photoMap[member.id] ||
-                  storedPhotos[member.id] ||
+                  storedPhotos[
+                    member.id
+                  ] ||
                   ""
                 : member.photo,
           }))
         );
       } catch (err) {
-        console.error("Unable to load members:", err);
+        console.error(
+          "Unable to load members:",
+          err
+        );
 
         if (active) {
           setMembersError(
@@ -929,7 +1390,10 @@ function Dashboard() {
     };
   }, [user?.id, photoRefresh]);
 
-  // Load logged-in user's photo from S3
+  // =====================================================
+  // LOAD LOGGED-IN USER'S PROFILE PHOTO
+  // =====================================================
+
   useEffect(() => {
     if (!user) return;
 
@@ -940,20 +1404,28 @@ function Dashboard() {
 
       try {
         fallback = myPhotoKey
-          ? localStorage.getItem(myPhotoKey) || ""
+          ? localStorage.getItem(
+              myPhotoKey
+            ) || ""
           : "";
       } catch {
         fallback = "";
       }
 
       try {
-        const url = await getPhotoUrl("me");
+        const url =
+          await getPhotoUrl("me");
 
         if (active) {
-          setMyPhoto(url || fallback);
+          setMyPhoto(
+            url || fallback
+          );
         }
       } catch (err) {
-        console.error("Unable to load my photo:", err);
+        console.error(
+          "Unable to load my photo:",
+          err
+        );
 
         if (active) {
           setMyPhoto(fallback);
@@ -970,7 +1442,15 @@ function Dashboard() {
     return () => {
       active = false;
     };
-  }, [user?.id, photoRefresh, myPhotoKey]);
+  }, [
+    user?.id,
+    photoRefresh,
+    myPhotoKey,
+  ]);
+
+  // =====================================================
+  // CLOSE PROFILE MODAL
+  // =====================================================
 
   const closeModal = () => {
     photoRequestRef.current += 1;
@@ -987,8 +1467,11 @@ function Dashboard() {
     setError("");
   };
 
+  // =====================================================
+  // OPEN ADD FAMILY MEMBER MODAL
+  // =====================================================
+
   const openAddModal = () => {
-    // Prevent adding while initial family data is loading
     if (familyLoading) return;
 
     photoRequestRef.current += 1;
@@ -1004,6 +1487,10 @@ function Dashboard() {
     setShowAddModal(true);
   };
 
+  // =====================================================
+  // OPEN EDIT FAMILY MEMBER MODAL
+  // =====================================================
+
   const openEditModal = (member) => {
     photoRequestRef.current += 1;
 
@@ -1017,6 +1504,10 @@ function Dashboard() {
     setError("");
     setShowAddModal(true);
   };
+
+  // =====================================================
+  // OPEN MY PROFILE
+  // =====================================================
 
   const openMyProfile = () => {
     photoRequestRef.current += 1;
@@ -1032,16 +1523,24 @@ function Dashboard() {
     setShowAddModal(true);
   };
 
+  // =====================================================
+  // HANDLE PROFILE PHOTO SELECTION
+  // =====================================================
+
   const handlePhotoChange = async (event) => {
-    const file = event.target.files?.[0];
+    const file =
+      event.target.files?.[0];
+
     event.target.value = "";
 
     if (!file) return;
 
     if (
-      !["image/jpeg", "image/png", "image/webp"].includes(
-        file.type
-      )
+      ![
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+      ].includes(file.type)
     ) {
       setError(
         "Please select a JPG, PNG, or WebP image."
@@ -1049,7 +1548,10 @@ function Dashboard() {
       return;
     }
 
-    if (file.size > 5 * 1024 * 1024) {
+    if (
+      file.size >
+      5 * 1024 * 1024
+    ) {
       setError(
         "Please select an image smaller than 5 MB."
       );
@@ -1067,7 +1569,8 @@ function Dashboard() {
         await processProfilePhoto(file);
 
       if (
-        requestId !== photoRequestRef.current
+        requestId !==
+        photoRequestRef.current
       ) {
         return;
       }
@@ -1076,7 +1579,8 @@ function Dashboard() {
       setPhotoChanged(true);
     } catch (err) {
       if (
-        requestId !== photoRequestRef.current
+        requestId !==
+        photoRequestRef.current
       ) {
         return;
       }
@@ -1087,20 +1591,30 @@ function Dashboard() {
       );
     } finally {
       if (
-        requestId === photoRequestRef.current
+        requestId ===
+        photoRequestRef.current
       ) {
         setProcessingPhoto(false);
       }
     }
   };
 
+  // =====================================================
+  // REMOVE PROFILE PHOTO
+  // =====================================================
+
   const handleRemovePhoto = () => {
     photoRequestRef.current += 1;
+
     setProcessingPhoto(false);
     setMemberPhoto("");
     setPhotoChanged(true);
     setError("");
   };
+
+  // =====================================================
+  // SAVE PROFILE PHOTO CHANGE
+  // =====================================================
 
   async function savePhotoChange(memberId) {
     if (!photoChanged) {
@@ -1130,15 +1644,25 @@ function Dashboard() {
     return "";
   }
 
+  // =====================================================
+  // SAVE FAMILY MEMBER / OWN PROFILE
+  // =====================================================
+
   const handleSaveMember = async (event) => {
     event.preventDefault();
     setError("");
 
-    if (processingPhoto || saving) {
+    if (
+      processingPhoto ||
+      saving
+    ) {
       return;
     }
 
-    // Save own profile photo
+    // =================================================
+    // SAVE OWN PROFILE PHOTO
+    // =================================================
+
     if (editingSelf) {
       setSaving(true);
 
@@ -1178,7 +1702,8 @@ function Dashboard() {
       return;
     }
 
-    const name = memberName.trim();
+    const name =
+      memberName.trim();
 
     if (!name) {
       setError(
@@ -1194,12 +1719,16 @@ function Dashboard() {
       return;
     }
 
-    // Edit family member photo
+    // =================================================
+    // EDIT EXISTING FAMILY MEMBER
+    // =================================================
+
     if (editingId) {
-      const existing = members.find(
-        (member) =>
-          member.id === editingId
-      );
+      const existing =
+        members.find(
+          (member) =>
+            member.id === editingId
+        );
 
       if (!existing) {
         setError(
@@ -1223,7 +1752,9 @@ function Dashboard() {
 
       try {
         const result =
-          await savePhotoChange(editingId);
+          await savePhotoChange(
+            editingId
+          );
 
         if (result !== null) {
           photoVersionRef.current += 1;
@@ -1244,11 +1775,15 @@ function Dashboard() {
               const photos =
                 getMemberPhotos();
 
-              delete photos[editingId];
+              delete photos[
+                editingId
+              ];
 
               localStorage.setItem(
                 memberPhotosKey,
-                JSON.stringify(photos)
+                JSON.stringify(
+                  photos
+                )
               );
             } catch {
               // AWS photo is saved.
@@ -1274,24 +1809,31 @@ function Dashboard() {
       return;
     }
 
-    // Create new family member
+    // =================================================
+    // CREATE NEW FAMILY MEMBER
+    // =================================================
+
     setSaving(true);
 
     let createdMember = null;
 
     try {
-      const result = await apiRequest(
-        "POST",
-        "/members",
-        {
-          name,
-          relationship,
-        }
-      );
+      const result =
+        await apiRequest(
+          "POST",
+          "/members",
+          {
+            name,
+            relationship,
+          }
+        );
 
-      createdMember = result.member;
+      createdMember =
+        result.member;
 
-      if (!createdMember?.memberId) {
+      if (
+        !createdMember?.memberId
+      ) {
         throw new Error(
           "The server did not return a member ID."
         );
@@ -1301,7 +1843,8 @@ function Dashboard() {
         ...previous,
         {
           ...createdMember,
-          id: createdMember.memberId,
+          id:
+            createdMember.memberId,
           photo: "",
         },
       ]);
@@ -1323,7 +1866,8 @@ function Dashboard() {
             createdMember.memberId
               ? {
                   ...member,
-                  photo: photoUrl || "",
+                  photo:
+                    photoUrl || "",
                 }
               : member
           )
@@ -1337,7 +1881,9 @@ function Dashboard() {
         err
       );
 
-      if (createdMember?.memberId) {
+      if (
+        createdMember?.memberId
+      ) {
         setError(
           "Family member was saved in DynamoDB, but the photo could not be uploaded. Close this window, open the new member, and try uploading the photo again. " +
             (err.message || "")
@@ -1353,15 +1899,20 @@ function Dashboard() {
     }
   };
 
-  // Existing backend doesn't yet support
-  // deleting DynamoDB family-member records.
+  // =====================================================
+  // EXISTING FAMILY MEMBER DELETE HANDLER
+  // =====================================================
+
   const handleDeleteMember = () => {
     setError(
       "Deleting family members requires the AWS DELETE endpoint. We will add that next."
     );
   };
 
-  // Manual logout
+  // =====================================================
+  // MANUAL LOGOUT
+  // =====================================================
+
   const handleLogout = async () => {
     if (loggingOut) return;
 
@@ -1393,8 +1944,9 @@ function Dashboard() {
   };
 
   // =====================================================
-  // KEEP SMOOTH LOGOUT SCREEN
+  // SMOOTH LOGOUT SCREEN
   // =====================================================
+
   if (loggingOut) {
     return (
       <div
@@ -1407,29 +1959,43 @@ function Dashboard() {
             className="dashboard-spinner"
             aria-hidden="true"
           />
-          <h2>Logging out, please wait...</h2>
-          <p>Securely ending your session</p>
+
+          <h2>
+            Logging out, please wait...
+          </h2>
+
+          <p>
+            Securely ending your session
+          </p>
         </div>
       </div>
     );
   }
 
   // =====================================================
-  // REMOVED: FULL-SCREEN DASHBOARD DATA LOADING
+  // WAIT FOR COGNITO USER
   // =====================================================
-  // Only wait for Cognito to identify the user.
-  // Family profiles load inside the visible dashboard.
+
   if (loading) {
     return null;
   }
 
-  if (!user) return null;
+  if (!user) {
+    return null;
+  }
+
+  // =====================================================
+  // DASHBOARD UI
+  // =====================================================
 
   return (
     <div className="dashboard-page">
       <main className="dashboard-container">
 
-        {/* HEADER */}
+        {/* =============================================
+            DASHBOARD HEADER
+        ============================================= */}
+
         <header className="dashboard-header">
           <div className="dashboard-user">
             <div className="dashboard-avatar">
@@ -1449,6 +2015,7 @@ function Dashboard() {
                 {user.name ||
                   "Complete your profile"}
               </h1>
+
               <p>Welcome Back!</p>
             </div>
           </div>
@@ -1476,34 +2043,58 @@ function Dashboard() {
           </div>
         </header>
 
-        {/* SEARCH BAR */}
+        {/* =============================================
+            NEW FEATURE: HOME UPLOAD DOCUMENTS
+
+            REPLACES THE OLD SEARCH BAR
+
+            Clicking opens the existing Documents
+            component with memberId = "me".
+
+            Documents automatically belong to
+            the primary account holder.
+        ============================================= */}
+
         <section className="dashboard-search">
-          <Search size={29} />
-
-          <input
-            type="search"
-            placeholder='Search "Wife Aadhaar Card"'
-            value={search}
-            onChange={(event) =>
-              setSearch(event.target.value)
-            }
-            aria-label="Search documents"
-          />
-
           <button
-            className="dashboard-icon-button"
-            aria-label="Voice search"
-            onClick={() =>
-              window.alert(
-                "Voice search will be added later."
-              )
-            }
+            type="button"
+            onClick={openHomeDocuments}
+            aria-label="Upload documents to my profile"
+            style={{
+              width: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "12px",
+              padding: "16px 20px",
+              border: "none",
+              borderRadius: "16px",
+              background: "#7147b5",
+              color: "#ffffff",
+              fontSize: "16px",
+              fontWeight: "700",
+              cursor: "pointer",
+              boxShadow:
+                "0 4px 14px rgba(113, 71, 181, 0.18)",
+              transition:
+                "background 0.2s ease",
+            }}
           >
-            <Mic size={25} />
+            <UploadCloud
+              size={25}
+              aria-hidden="true"
+            />
+
+            <span>
+              Upload Documents
+            </span>
           </button>
         </section>
 
-        {/* MY FAMILY */}
+        {/* =============================================
+            MY FAMILY SECTION
+        ============================================= */}
+
         <section className="dashboard-section">
           <div className="dashboard-section-heading">
             <h2>My Family</h2>
@@ -1518,8 +2109,6 @@ function Dashboard() {
             </button>
           </div>
 
-          {/* Old "Loading family members..." text removed */}
-
           {membersError && (
             <p
               className="family-form-error"
@@ -1531,7 +2120,8 @@ function Dashboard() {
 
           <div className="family-card">
 
-            {/* ME PROFILE */}
+            {/* MY PROFILE */}
+
             <button
               type="button"
               className="family-member family-member-button me-member"
@@ -1559,7 +2149,8 @@ function Dashboard() {
               </span>
             </button>
 
-            {/* FAMILY MEMBERS */}
+            {/* EXISTING FAMILY MEMBERS */}
+
             {members.map((member) => (
               <button
                 key={member.id}
@@ -1592,7 +2183,8 @@ function Dashboard() {
               </button>
             ))}
 
-            {/* NEW: ADD MEMBER SPINNER */}
+            {/* ADD MEMBER WITH LOADING SPINNER */}
+
             <button
               type="button"
               className="family-member family-member-button"
@@ -1624,7 +2216,10 @@ function Dashboard() {
           </div>
         </section>
 
-        {/* MAIN CATEGORIES */}
+        {/* =============================================
+            MAIN CATEGORIES
+        ============================================= */}
+
         <section className="dashboard-section">
           <div className="dashboard-section-heading">
             <h2>Main Categories</h2>
@@ -1659,6 +2254,7 @@ function Dashboard() {
                   }
                 >
                   <CategoryIcon size={26} />
+
                   <span>
                     {category.name}
                   </span>
@@ -1668,7 +2264,10 @@ function Dashboard() {
           </div>
         </section>
 
-        {/* NEEDS ATTENTION */}
+        {/* =============================================
+            NEEDS ATTENTION
+        ============================================= */}
+
         <section className="dashboard-section">
           <div className="dashboard-section-heading">
             <h2>Needs Attention</h2>
@@ -1713,13 +2312,17 @@ function Dashboard() {
                 }
               >
                 Manage Reminders
+
                 <ChevronRight size={18} />
               </button>
             </div>
           </div>
         </section>
 
-        {/* OTHER SECTIONS */}
+        {/* =============================================
+            OTHER NAVIGATION SECTIONS
+        ============================================= */}
+
         {activeTab !== "Home" && (
           <section className="dashboard-current-tab">
             <h3>
@@ -1733,7 +2336,10 @@ function Dashboard() {
           </section>
         )}
 
-        {/* LOGOUT */}
+        {/* =============================================
+            LOGOUT ERROR
+        ============================================= */}
+
         {logoutError && (
           <p
             className="family-form-error"
@@ -1742,6 +2348,10 @@ function Dashboard() {
             {logoutError}
           </p>
         )}
+
+        {/* =============================================
+            LOGOUT BUTTON
+        ============================================= */}
 
         <button
           type="button"
@@ -1757,8 +2367,14 @@ function Dashboard() {
         </button>
       </main>
 
-      {/* BOTTOM NAVIGATION */}
+      {/* =============================================
+          BOTTOM NAVIGATION
+      ============================================= */}
+
       <nav className="dashboard-bottom-nav">
+
+        {/* HOME */}
+
         <button
           className={
             activeTab === "Home"
@@ -1772,6 +2388,8 @@ function Dashboard() {
           <Home size={23} />
           <span>Home</span>
         </button>
+
+        {/* MY FAMILY */}
 
         <button
           className={
@@ -1787,6 +2405,8 @@ function Dashboard() {
           <span>My Family</span>
         </button>
 
+        {/* ADD FAMILY MEMBER */}
+
         <button
           className="dashboard-floating-add"
           aria-label="Add family member"
@@ -1795,6 +2415,8 @@ function Dashboard() {
         >
           <Plus size={32} />
         </button>
+
+        {/* CATEGORY */}
 
         <button
           className={
@@ -1809,6 +2431,8 @@ function Dashboard() {
           <LayoutGrid size={23} />
           <span>Category</span>
         </button>
+
+        {/* SETTINGS */}
 
         <button
           className={
@@ -1825,7 +2449,10 @@ function Dashboard() {
         </button>
       </nav>
 
-      {/* ADD / EDIT PROFILE MODAL */}
+      {/* =============================================
+          ADD / EDIT PROFILE MODAL
+      ============================================= */}
+
       {showAddModal && (
         <div
           className="family-modal-overlay"
@@ -1866,7 +2493,8 @@ function Dashboard() {
 
             <form onSubmit={handleSaveMember}>
 
-              {/* PHOTO UPLOAD */}
+              {/* PROFILE PHOTO */}
+
               <div className="family-photo-section">
                 <div className="family-photo-preview">
                   {memberPhoto ? (
@@ -1923,7 +2551,8 @@ function Dashboard() {
                 )}
               </div>
 
-              {/* USER OR FAMILY DETAILS */}
+              {/* USER OR FAMILY MEMBER DETAILS */}
+
               {editingSelf ? (
                 <div className="family-self-info">
                   <p>
@@ -1994,6 +2623,8 @@ function Dashboard() {
                 </>
               )}
 
+              {/* FORM ERROR */}
+
               {error && (
                 <p
                   className="family-form-error"
@@ -2002,6 +2633,8 @@ function Dashboard() {
                   {error}
                 </p>
               )}
+
+              {/* SAVE BUTTON */}
 
               <button
                 type="submit"
@@ -2020,6 +2653,8 @@ function Dashboard() {
                   : "Create Profile"}
               </button>
 
+              {/* DELETE MEMBER */}
+
               {editingId &&
                 !editingSelf && (
                   <button
@@ -2034,21 +2669,40 @@ function Dashboard() {
                 )}
             </form>
 
-            {/* ADDED: Open documents without changing profile edit/save behavior */}
+            {/* =====================================
+                EXISTING MANAGE DOCUMENTS BUTTON
+
+                THIS FUNCTIONALITY IS UNCHANGED.
+
+                Family member -> member's ID
+                Own profile -> "me"
+            ===================================== */}
+
             {(editingSelf || editingId) && (
               <button
                 type="button"
                 className="family-save-button"
-                style={{ marginTop: "12px" }}
+                style={{
+                  marginTop: "12px",
+                }}
                 onClick={() =>
                   openMemberDocuments(
-                    editingSelf ? "me" : editingId,
-                    editingSelf ? (user.name || "My") : (memberName || "Family member")
+                    editingSelf
+                      ? "me"
+                      : editingId,
+                    editingSelf
+                      ? user.name || "My"
+                      : memberName ||
+                          "Family member"
                   )
                 }
-                disabled={saving || processingPhoto}
+                disabled={
+                  saving ||
+                  processingPhoto
+                }
               >
                 <FileText size={18} />
+
                 Manage Documents
               </button>
             )}
@@ -2056,17 +2710,36 @@ function Dashboard() {
         </div>
       )}
 
-      {/* ADDED: Document manager modal; original dashboard remains intact */}
+      {/* =============================================
+          SHARED DOCUMENT MANAGER MODAL
+
+          TWO WAYS TO OPEN THIS:
+
+          METHOD 1:
+          Family profile -> Manage Documents
+          memberId = selected family member
+
+          METHOD 2:
+          Home -> Upload Documents
+          memberId = "me"
+
+          SAME EXISTING AWS UPLOAD FUNCTIONALITY
+      ============================================= */}
+
       {documentMember && (
         <div
           className="family-modal-overlay"
-          onClick={() => setDocumentMember(null)}
+          onClick={() =>
+            setDocumentMember(null)
+          }
         >
           <div
             role="dialog"
             aria-modal="true"
             aria-label="Manage family documents"
-            onClick={(event) => event.stopPropagation()}
+            onClick={(event) =>
+              event.stopPropagation()
+            }
             style={{
               width: "min(96vw, 760px)",
               maxHeight: "90vh",
@@ -2076,15 +2749,24 @@ function Dashboard() {
             }}
           >
             <Documents
-              memberId={documentMember.memberId}
-              memberName={documentMember.name}
-              onClose={() => setDocumentMember(null)}
+              memberId={
+                documentMember.memberId
+              }
+              memberName={
+                documentMember.name
+              }
+              onClose={() =>
+                setDocumentMember(null)
+              }
             />
           </div>
         </div>
       )}
 
-      {/* SESSION TIMEOUT MESSAGE */}
+      {/* =============================================
+          SESSION TIMEOUT MESSAGE
+      ============================================= */}
+
       {sessionTimedOut && (
         <div
           className="family-modal-overlay"
@@ -2108,7 +2790,8 @@ function Dashboard() {
             </h2>
 
             <p>
-              Please Login again to continue using the application.
+              Please Login again to continue
+              using the application.
             </p>
 
             <p>
