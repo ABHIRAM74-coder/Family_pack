@@ -412,6 +412,8 @@ function Documents({
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [uploadPhase, setUploadPhase] = useState(0);
+  const [uploadFileName, setUploadFileName] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [file, setFile] = useState(null);
@@ -497,6 +499,8 @@ function Documents({
       return;
     }
 
+    setUploadFileName(file.name);
+    setUploadPhase(1);
     setBusy(true);
 
     let uploadStage =
@@ -531,6 +535,7 @@ function Documents({
       }
 
       uploadStage = "Stage 2: Uploading file to S3";
+      setUploadPhase(2);
 
       const formData = new FormData();
 
@@ -569,6 +574,7 @@ function Documents({
 
       uploadStage =
         "Stage 3: Confirming document upload";
+      setUploadPhase(3);
 
       await documentsApi(
         "POST",
@@ -591,6 +597,8 @@ function Documents({
       setError(`${uploadStage} — ${err.message}`);
     } finally {
       setBusy(false);
+      setUploadPhase(0);
+      setUploadFileName("");
     }
   }
 
@@ -719,6 +727,30 @@ function Documents({
       className="documents-panel"
       aria-label={isHomeUpload ? "Upload Documents" : `${memberName} documents`}
     >
+      <style>{`
+        @keyframes familyUploadSlide { 0% { transform:translateX(-110%); } 100% { transform:translateX(360%); } }
+        @keyframes familyUploadSpin { to { transform:rotate(360deg); } }
+        @keyframes familyUploadFloat { 0%,100% { transform:translateY(0); } 50% { transform:translateY(-4px); } }
+        @keyframes familyUploadDot { 0%,65%,100% { opacity:.25; transform:scale(.8); } 35% { opacity:1; transform:scale(1); } }
+        @keyframes familyUploadAppear { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+        .document-upload-progress { margin:16px 0; padding:20px; border:1px solid #e4dcfa; border-radius:18px; background:linear-gradient(140deg,#faf8ff,#f4f8ff); box-shadow:0 8px 24px rgba(91,62,155,.08); animation:familyUploadAppear .35s ease both; }
+        .document-upload-progress-top { display:flex; align-items:center; gap:12px; min-width:0; }
+        .document-upload-progress-icon { display:grid; place-items:center; flex:0 0 48px; height:48px; border-radius:15px; background:#e9e1fb; color:#7147b5; animation:familyUploadFloat 2s ease-in-out infinite; }
+        .document-upload-progress-copy { display:flex; flex-direction:column; min-width:0; flex:1; gap:4px; }
+        .document-upload-progress-copy strong { color:#352357; font-size:15px; }
+        .document-upload-progress-copy span { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-size:13px; color:#766c89; }
+        .document-upload-progress-dots { display:flex; gap:4px; }
+        .document-upload-progress-dots i { width:6px; height:6px; border-radius:50%; background:#7147b5; animation:familyUploadDot 1.2s ease-in-out infinite; }
+        .document-upload-progress-dots i:nth-child(2) { animation-delay:.2s; }
+        .document-upload-progress-dots i:nth-child(3) { animation-delay:.4s; }
+        .document-upload-progress-track { position:relative; height:8px; overflow:hidden; border-radius:99px; background:#e5ddf5; margin-top:18px; }
+        .document-upload-progress-bar { position:absolute; width:30%; height:100%; border-radius:99px; background:linear-gradient(90deg,#7147b5,#a78bfa); animation:familyUploadSlide 1.65s ease-in-out infinite; }
+        .document-upload-progress-steps { display:flex; justify-content:space-between; gap:8px; margin-top:12px; color:#9a91a9; font-size:11px; font-weight:600; }
+        .document-upload-progress-steps .current { color:#7147b5; }
+        .document-upload-progress > p { margin:13px 0 0; font-size:12px; color:#766c89; }
+        .document-upload-spinner { width:18px; height:18px; display:inline-block; flex-shrink:0; border:2px solid rgba(255,255,255,.4); border-top-color:currentColor; border-radius:50%; animation:familyUploadSpin .75s linear infinite; }
+        @media (prefers-reduced-motion:reduce) { .document-upload-progress *, .document-upload-spinner { animation:none !important; } .document-upload-progress-bar { width:100%; transform:none; } }
+      `}</style>
       <div className="documents-header">
         <div>
           <h2>{isHomeUpload ? "Upload Documents" : `${memberName}'s Documents`}</h2>
@@ -791,13 +823,44 @@ function Documents({
           type="submit"
           disabled={!file || busy}
         >
-          <Plus size={18} />
-
-          {busy
-            ? "Please wait..."
-            : "Upload Document"}
+          {busy ? (
+            <span className="document-upload-spinner" aria-hidden="true" />
+          ) : (
+            <Plus size={18} />
+          )}
+          {busy ? "Uploading securely…" : "Upload Document"}
         </button>
       </form>
+
+      {busy && uploadPhase > 0 && (
+        <div className="document-upload-progress" role="status" aria-live="polite" aria-atomic="true">
+          <div className="document-upload-progress-top">
+            <span className="document-upload-progress-icon" aria-hidden="true">
+              <UploadCloud size={24} />
+            </span>
+            <div className="document-upload-progress-copy">
+              <strong>
+                {uploadPhase === 1
+                  ? "Preparing secure upload"
+                  : uploadPhase === 2
+                    ? "Uploading your document"
+                    : "Finishing up securely"}
+              </strong>
+              <span title={uploadFileName}>{uploadFileName}</span>
+            </div>
+            <span className="document-upload-progress-dots" aria-hidden="true"><i /><i /><i /></span>
+          </div>
+          <div className="document-upload-progress-track" aria-label="Upload in progress">
+            <div className="document-upload-progress-bar" />
+          </div>
+          <div className="document-upload-progress-steps">
+            <span className={uploadPhase >= 1 ? "current" : ""}>1. Preparing</span>
+            <span className={uploadPhase >= 2 ? "current" : ""}>2. Uploading</span>
+            <span className={uploadPhase >= 3 ? "current" : ""}>3. Saving</span>
+          </div>
+          <p>Please keep this window open. Your file is being processed securely.</p>
+        </div>
+      )}
 
       {error && (
         <p
