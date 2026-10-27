@@ -41,6 +41,9 @@ const API_URL =
 
 const INACTIVITY_LIMIT = 10 * 60 * 1000;
 
+const SCANNER_API_URL =
+  "https://nygza2d72c.execute-api.ap-southeast-2.amazonaws.com";
+
 const RELATIONSHIPS = [
   "Mother",
   "Father",
@@ -417,6 +420,9 @@ function Documents({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [file, setFile] = useState(null);
+  const [scanningId, setScanningId] = useState(null);
+  const [scanResult, setScanResult] = useState(null);
+  const [scanError, setScanError] = useState("");
 
   const [documentType, setDocumentType] =
     useState("Aadhaar Card");
@@ -599,6 +605,45 @@ function Documents({
       setBusy(false);
       setUploadPhase(0);
       setUploadFileName("");
+    }
+  }
+
+  // =====================================================
+  // SCAN EXISTING DOCUMENT WITH NOVA 2 LITE
+  // =====================================================
+
+  async function handleScan(document) {
+    if (scanningId || busy) return;
+
+    setScanningId(document.documentId);
+    setScanResult(null);
+    setScanError("");
+
+    try {
+      const token = await getAuthToken();
+      const response = await fetch(`${SCANNER_API_URL}/scan`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ documentId: document.documentId }),
+      });
+
+      const result = await response.json().catch(() => ({}));
+      const body = typeof result.body === "string"
+        ? JSON.parse(result.body)
+        : result;
+
+      if (!response.ok || body.success === false) {
+        throw new Error(body.error || body.message || `Scan failed (${response.status})`);
+      }
+
+      setScanResult(body);
+    } catch (err) {
+      setScanError(err.message || "Unable to scan document.");
+    } finally {
+      setScanningId(null);
     }
   }
 
@@ -880,6 +925,58 @@ function Documents({
         </p>
       )}
 
+      {scanError && (
+        <p className="documents-error" role="alert">{scanError}</p>
+      )}
+
+      {scanResult && (
+        <section className="family-scanner-result" aria-label="AI scan results"
+          style={{ margin: "18px 0", padding: 18, border: "1px solid #ded5f1", borderRadius: 16, background: "#faf8ff" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+            <h3 style={{ margin: 0 }}>AI Document Scan</h3>
+            <button type="button" onClick={() => setScanResult(null)} aria-label="Close scan result"><X size={18} /></button>
+          </div>
+          <p><strong>File:</strong> {scanResult.fileName || "Document"}</p>
+          <p><strong>Detected type:</strong> {scanResult.extractedData?.documentType || "Unknown"}</p>
+          <h4>Extracted fields</h4>
+          {Object.keys(scanResult.extractedData?.fields || {}).length ? (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", textAlign: "left", borderCollapse: "collapse" }}>
+                <tbody>
+                  {Object.entries(scanResult.extractedData.fields).map(([key, value]) => (
+                    <tr key={key}>
+                      <th style={{ padding: 8, borderBottom: "1px solid #e8e0f4" }}>{key}</th>
+                      <td style={{ padding: 8, borderBottom: "1px solid #e8e0f4", whiteSpace: "pre-wrap" }}>
+                        {value == null ? "—" : typeof value === "object" ? JSON.stringify(value) : String(value)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : <p>No structured fields returned.</p>}
+          {!!scanResult.extractedData?.tables?.length && (
+            <>
+              <h4>Tables</h4>
+              <pre style={{ overflowX: "auto", whiteSpace: "pre-wrap" }}>{JSON.stringify(scanResult.extractedData.tables, null, 2)}</pre>
+            </>
+          )}
+          {!!scanResult.extractedData?.warnings?.length && (
+            <p><strong>Warnings:</strong> {scanResult.extractedData.warnings.join("; ")}</p>
+          )}
+          <h4>Model usage</h4>
+          <table style={{ width: "100%", textAlign: "left" }}>
+            <tbody>
+              <tr><th>Model</th><td>{scanResult.model}</td></tr>
+              <tr><th>Input tokens</th><td>{scanResult.inputTokens ?? 0}</td></tr>
+              <tr><th>Output tokens</th><td>{scanResult.outputTokens ?? 0}</td></tr>
+              <tr><th>Total tokens</th><td>{scanResult.totalTokens ?? 0}</td></tr>
+              <tr><th>Execution time</th><td>{scanResult.executionTimeSeconds ?? "—"} seconds</td></tr>
+            </tbody>
+          </table>
+        </section>
+      )}
+
       {loading ? (
         <p className="documents-empty">
           Loading documents...
@@ -923,6 +1020,17 @@ function Documents({
                     </div>
 
                     <div className="documents-item-actions">
+                      <button
+                        type="button"
+                        onClick={() => handleScan(document)}
+                        disabled={busy || !!scanningId}
+                        title="Scan with AI"
+                        aria-label={`Scan ${document.fileName} with AI`}
+                        style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "7px 10px", color: "#7147b5" }}
+                      >
+                        <FileText size={17} />
+                        {scanningId === document.documentId ? "Scanning…" : "AI Scan"}
+                      </button>
                       <button
                         type="button"
                         onClick={() =>
