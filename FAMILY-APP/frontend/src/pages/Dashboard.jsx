@@ -41,8 +41,6 @@ const API_URL =
 
 const INACTIVITY_LIMIT = 10 * 60 * 1000;
 
-const SCANNER_API_URL =
-  "https://nygza2d72c.execute-api.ap-southeast-2.amazonaws.com";
 
 const RELATIONSHIPS = [
   "Mother",
@@ -420,7 +418,7 @@ function Documents({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [file, setFile] = useState(null);
-  const [scanningId, setScanningId] = useState(null);
+  const [detailsLoadingId, setDetailsLoadingId] = useState(null);
   const [scanResult, setScanResult] = useState(null);
   const [scanError, setScanError] = useState("");
 
@@ -609,41 +607,46 @@ function Documents({
   }
 
   // =====================================================
-  // SCAN EXISTING DOCUMENT WITH NOVA 2 LITE
+  // VIEW SAVED AI DOCUMENT DETAILS
+  //
+  // Reads the result already stored in DynamoDB.
+  // This does NOT call Bedrock and does NOT consume new AI tokens.
   // =====================================================
 
-  async function handleScan(document) {
-    if (scanningId || busy) return;
+  async function handleViewDetails(document) {
+    if (detailsLoadingId || busy) return;
 
-    setScanningId(document.documentId);
+    setDetailsLoadingId(document.documentId);
     setScanResult(null);
     setScanError("");
 
     try {
-      const token = await getAuthToken();
-      const response = await fetch(`${SCANNER_API_URL}/scan`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ documentId: document.documentId }),
+      const result = await documentsApi(
+        "GET",
+        `/documents/details?documentId=${encodeURIComponent(
+          document.documentId
+        )}`
+      );
+
+      const savedResult = result.scanResult || {};
+
+      setScanResult({
+        fileName: result.fileName || document.fileName || "Document",
+        extractedData: savedResult,
+        model: result.scanModel || "—",
+        inputTokens: result.inputTokens ?? 0,
+        outputTokens: result.outputTokens ?? 0,
+        totalTokens: result.totalTokens ?? 0,
+        executionTimeSeconds:
+          result.scanTimeSeconds ?? result.executionTimeSeconds ?? "—",
+        scannedAt: result.scannedAt || "",
       });
-
-      const result = await response.json().catch(() => ({}));
-      const body = typeof result.body === "string"
-        ? JSON.parse(result.body)
-        : result;
-
-      if (!response.ok || body.success === false) {
-        throw new Error(body.error || body.message || `Scan failed (${response.status})`);
-      }
-
-      setScanResult(body);
     } catch (err) {
-      setScanError(err.message || "Unable to scan document.");
+      setScanError(
+        err.message || "Unable to load saved document details."
+      );
     } finally {
-      setScanningId(null);
+      setDetailsLoadingId(null);
     }
   }
 
@@ -972,6 +975,9 @@ function Documents({
               <tr><th>Output tokens</th><td>{scanResult.outputTokens ?? 0}</td></tr>
               <tr><th>Total tokens</th><td>{scanResult.totalTokens ?? 0}</td></tr>
               <tr><th>Execution time</th><td>{scanResult.executionTimeSeconds ?? "—"} seconds</td></tr>
+              {scanResult.scannedAt && (
+                <tr><th>Scanned at</th><td>{scanResult.scannedAt}</td></tr>
+              )}
             </tbody>
           </table>
         </section>
@@ -1020,17 +1026,51 @@ function Documents({
                     </div>
 
                     <div className="documents-item-actions">
-                      <button
-                        type="button"
-                        onClick={() => handleScan(document)}
-                        disabled={busy || !!scanningId}
-                        title="Scan with AI"
-                        aria-label={`Scan ${document.fileName} with AI`}
-                        style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "7px 10px", color: "#7147b5" }}
-                      >
-                        <FileText size={17} />
-                        {scanningId === document.documentId ? "Scanning…" : "AI Scan"}
-                      </button>
+                      {document.scanStatus === "COMPLETED" ? (
+                        <button
+                          type="button"
+                          onClick={() => handleViewDetails(document)}
+                          disabled={busy || !!detailsLoadingId}
+                          title="View saved AI details"
+                          aria-label={`View details for ${document.fileName}`}
+                          style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "7px 10px", color: "#7147b5" }}
+                        >
+                          <FileText size={17} />
+                          {detailsLoadingId === document.documentId
+                            ? "Loading…"
+                            : "View Details"}
+                        </button>
+                      ) : document.scanStatus === "PROCESSING" ? (
+                        <button
+                          type="button"
+                          disabled
+                          title="AI analysis is in progress"
+                          style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "7px 10px" }}
+                        >
+                          <RefreshCw size={17} />
+                          Analyzing…
+                        </button>
+                      ) : document.scanStatus === "FAILED" ? (
+                        <button
+                          type="button"
+                          disabled
+                          title={document.scanError || "Automatic AI scan failed"}
+                          style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "7px 10px" }}
+                        >
+                          <FileText size={17} />
+                          Scan Failed
+                        </button>
+                      ) : document.scanStatus === "NOT_SUPPORTED" ? (
+                        <button
+                          type="button"
+                          disabled
+                          title="AI analysis is not available for this file type"
+                          style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "7px 10px" }}
+                        >
+                          <FileText size={17} />
+                          Not Supported
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         onClick={() =>
