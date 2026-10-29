@@ -803,8 +803,38 @@ function Documents({
         @keyframes familyUploadFloat { 0%,100% { transform:translateY(0); } 50% { transform:translateY(-4px); } }
         @keyframes familyUploadDot { 0%,65%,100% { opacity:.25; transform:scale(.8); } 35% { opacity:1; transform:scale(1); } }
         @keyframes familyUploadAppear { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
-        @keyframes documentScanSpin { to { transform:rotate(360deg); } }
-        .document-scan-spinner { animation:documentScanSpin 1s linear infinite; }
+        @keyframes documentScanSpin {
+          from { transform:rotate(0deg); }
+          to { transform:rotate(360deg); }
+        }
+        @keyframes documentScanDotBlink {
+          0%, 20%, 100% { opacity:.20; transform:translateY(0); }
+          45% { opacity:1; transform:translateY(-1px); }
+        }
+        .document-scan-spinner {
+          display:inline-block;
+          flex-shrink:0;
+          transform-origin:center;
+          animation:documentScanSpin .85s linear infinite;
+        }
+        .document-scan-label {
+          display:inline-flex;
+          align-items:baseline;
+          white-space:nowrap;
+        }
+        .document-scan-dots {
+          display:inline-flex;
+          align-items:baseline;
+          min-width:13px;
+          margin-left:1px;
+        }
+        .document-scan-dots i {
+          display:inline-block;
+          font-style:normal;
+          animation:documentScanDotBlink 1.15s ease-in-out infinite;
+        }
+        .document-scan-dots i:nth-child(2) { animation-delay:.18s; }
+        .document-scan-dots i:nth-child(3) { animation-delay:.36s; }
         .document-upload-progress { margin:16px 0; padding:20px; border:1px solid #e4dcfa; border-radius:18px; background:linear-gradient(140deg,#faf8ff,#f4f8ff); box-shadow:0 8px 24px rgba(91,62,155,.08); animation:familyUploadAppear .35s ease both; }
         .document-upload-progress-top { display:flex; align-items:center; gap:12px; min-width:0; }
         .document-upload-progress-icon { display:grid; place-items:center; flex:0 0 48px; height:48px; border-radius:15px; background:#e9e1fb; color:#7147b5; animation:familyUploadFloat 2s ease-in-out infinite; }
@@ -821,7 +851,7 @@ function Documents({
         .document-upload-progress-steps .current { color:#7147b5; }
         .document-upload-progress > p { margin:13px 0 0; font-size:12px; color:#766c89; }
         .document-upload-spinner { width:18px; height:18px; display:inline-block; flex-shrink:0; border:2px solid rgba(255,255,255,.4); border-top-color:currentColor; border-radius:50%; animation:familyUploadSpin .75s linear infinite; }
-        @media (prefers-reduced-motion:reduce) { .document-upload-progress *, .document-upload-spinner, .document-scan-spinner { animation:none !important; } .document-upload-progress-bar { width:100%; transform:none; } }
+        @media (prefers-reduced-motion:reduce) { .document-upload-progress *, .document-upload-spinner, .document-scan-spinner, .document-scan-dots i { animation:none !important; } .document-upload-progress-bar { width:100%; transform:none; } }
       `}</style>
       <div className="documents-header">
         <div>
@@ -1076,7 +1106,14 @@ function Documents({
                             className="document-scan-spinner"
                             aria-hidden="true"
                           />
-                          Analyzing…
+                          <span className="document-scan-label">
+                            Analyzing
+                            <span className="document-scan-dots" aria-hidden="true">
+                              <i>.</i>
+                              <i>.</i>
+                              <i>.</i>
+                            </span>
+                          </span>
                         </button>
                       ) : document.scanStatus === "FAILED" ? (
                         <button
