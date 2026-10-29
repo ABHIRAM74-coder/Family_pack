@@ -473,6 +473,28 @@ function Documents({
   }, [loadDocuments]);
 
   // =====================================================
+  // AUTO-REFRESH WHILE AI SCAN IS PROCESSING
+  // =====================================================
+
+  useEffect(() => {
+    const hasProcessingDocument = documents.some(
+      (document) => document.scanStatus === "PROCESSING"
+    );
+
+    if (!hasProcessingDocument) {
+      return;
+    }
+
+    const intervalId = setInterval(() => {
+      loadDocuments();
+    }, 3000);
+
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [documents, loadDocuments]);
+
+  // =====================================================
   // UPLOAD DOCUMENT
   // =====================================================
 
