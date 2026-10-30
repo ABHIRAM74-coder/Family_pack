@@ -1321,3 +1321,240 @@
     transition: none;
   }
 }
+
+/* =========================================================
+   FAMILYKIT — COMPLETE MOBILE RESPONSIVE LAYER
+   Desktop design remains unchanged.
+   ========================================================= */
+
+html, body, #root {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.dashboard-page, .dashboard-container, .documents-panel,
+.family-modal, .dashboard-current-tab {
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 768px) {
+  .dashboard-page {
+    padding-left: 16px;
+    padding-right: 16px;
+    padding-bottom: calc(118px + env(safe-area-inset-bottom));
+  }
+
+  .dashboard-header { gap: 12px; }
+  .dashboard-user, .dashboard-greeting { flex: 1 1 auto; min-width: 0; }
+  .dashboard-greeting h1, .dashboard-greeting p { max-width: 100%; overflow-wrap: anywhere; }
+  .dashboard-header-actions { flex: 0 0 auto; }
+  .dashboard-section-heading { flex-wrap: wrap; }
+  .dashboard-categories { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dashboard-category-pill, .dashboard-attention-card, .attention-content { min-width: 0; }
+
+  .family-modal-overlay { padding: 14px; }
+  .family-modal { max-height: calc(100dvh - 28px); }
+
+  .documents-panel { padding: 20px 16px; overflow-x: hidden; }
+  .documents-header { align-items: flex-start; }
+  .documents-header > div:first-child { min-width: 0; flex: 1 1 auto; }
+  .documents-header h2, .documents-header p, .documents-group h3 { overflow-wrap: anywhere; }
+  .documents-upload { padding: 16px; }
+  .documents-upload input, .documents-upload select, .documents-upload button { max-width: 100%; }
+  .documents-upload button {
+    width: 100%; min-height: 48px; display: inline-flex;
+    align-items: center; justify-content: center; gap: 8px;
+  }
+
+  .documents-groups, .documents-group { min-width: 0; width: 100%; }
+  .documents-item {
+    align-items: flex-start; flex-wrap: wrap; gap: 12px; padding: 14px;
+  }
+  .documents-item > svg { flex: 0 0 auto; margin-top: 2px; }
+  .documents-item-info { flex: 1 1 calc(100% - 40px); width: auto; min-width: 0; }
+  .documents-item-info strong {
+    max-width: 100%; overflow-wrap: anywhere; word-break: break-word;
+  }
+  .documents-item-actions {
+    width: 100%; display: flex; flex-wrap: wrap;
+    justify-content: flex-start; gap: 8px; padding-left: 35px;
+  }
+  .documents-item-actions button { min-height: 42px; max-width: 100%; }
+
+  .family-scanner-result { max-width: 100%; overflow-x: auto; }
+  .family-scanner-result table { min-width: 520px; }
+  .family-scanner-result pre { max-width: 100%; overflow-x: auto; }
+  .document-upload-progress, .document-upload-progress-copy { max-width: 100%; min-width: 0; }
+}
+
+@media (max-width: 480px) {
+  .dashboard-page {
+    padding: 16px 12px calc(110px + env(safe-area-inset-bottom));
+  }
+
+  .dashboard-header { align-items: flex-start; gap: 9px; margin-bottom: 20px; }
+  .dashboard-user { gap: 10px; }
+  .dashboard-avatar { width: 46px; height: 46px; }
+  .dashboard-greeting h1 { font-size: clamp(16px, 5vw, 19px); line-height: 1.2; }
+  .dashboard-greeting p { margin-top: 3px; font-size: 12px; line-height: 1.35; }
+  .dashboard-header-actions { gap: 0; }
+  .dashboard-circle-button, .dashboard-icon-button {
+    min-width: 38px; min-height: 38px; padding: 7px;
+  }
+
+  .dashboard-search {
+    min-height: 52px; margin-bottom: 24px; border-radius: 17px;
+  }
+  .dashboard-search input { font-size: 16px; }
+
+  .dashboard-section { margin-bottom: 24px; }
+  .dashboard-section-heading { gap: 8px; margin-bottom: 13px; }
+  .dashboard-section-heading h2 { font-size: 18px; }
+  .dashboard-text-button { font-size: 12px; padding: 6px; }
+
+  .family-card {
+    gap: 8px; padding: 16px 8px; border-radius: 19px;
+    -webkit-overflow-scrolling: touch; scroll-snap-type: x proximity;
+  }
+  .family-member { flex: 0 0 76px; scroll-snap-align: start; }
+  .family-avatar { width: 58px; height: 58px; }
+  .family-member-name { font-size: 11.5px; line-height: 1.25; }
+  .family-member-relation { font-size: 10.5px; line-height: 1.25; }
+
+  .dashboard-categories {
+    grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px;
+  }
+  .dashboard-category-pill {
+    min-height: 68px; padding: 10px 8px; border-radius: 17px;
+    gap: 7px; font-size: 12px; line-height: 1.2; overflow-wrap: anywhere;
+  }
+
+  .dashboard-attention-card { padding: 15px; gap: 10px; border-radius: 19px; }
+  .attention-icon { width: 44px; height: 44px; border-radius: 14px; }
+  .attention-content h3 { font-size: 15px; overflow-wrap: anywhere; }
+  .attention-content p { font-size: 12px; line-height: 1.5; }
+
+  .dashboard-bottom-nav {
+    width: calc(100% - 12px); max-width: none; min-height: 68px;
+    bottom: max(6px, env(safe-area-inset-bottom)); padding: 7px 3px;
+    border-radius: 20px;
+  }
+  .dashboard-bottom-nav > button:not(.dashboard-floating-add) {
+    min-width: 0; padding: 6px 1px; gap: 3px; font-size: 9px; line-height: 1.1;
+  }
+  .dashboard-bottom-nav > button:not(.dashboard-floating-add) svg {
+    width: 19px; height: 19px;
+  }
+  .dashboard-floating-add {
+    width: 52px; height: 52px; border-width: 4px; margin-top: -29px;
+  }
+
+  .family-modal-overlay { align-items: flex-end; padding: 8px; }
+  .family-modal {
+    width: 100%; max-width: none; max-height: calc(100dvh - 16px);
+    padding: 20px 16px calc(20px + env(safe-area-inset-bottom));
+    border-radius: 22px 22px 16px 16px;
+  }
+  .family-modal-header { margin-bottom: 17px; }
+  .family-modal-header h2 { font-size: 19px; }
+  .family-modal input, .family-modal select { height: 48px; font-size: 16px; }
+  .family-photo-preview { width: 78px; height: 78px; }
+  .family-self-info { padding: 10px 12px; }
+  .family-self-info p { font-size: 12px; }
+
+  .documents-panel { padding: 14px 4px 20px; }
+  .documents-header { gap: 8px; margin-bottom: 17px; }
+  .documents-header h2 { font-size: 18px; line-height: 1.25; }
+  .documents-header p { margin-top: 4px; font-size: 11.5px; line-height: 1.4; }
+  .documents-header-actions { display: flex; flex: 0 0 auto; gap: 3px; }
+  .documents-header-actions button, .documents-close {
+    width: 36px; height: 36px; min-width: 36px; padding: 7px;
+  }
+
+  .documents-upload {
+    padding: 14px; margin-bottom: 18px; border-radius: 15px;
+  }
+  .documents-upload label { font-size: 12px; }
+  .documents-upload input, .documents-upload select { padding: 11px; font-size: 16px; }
+  .documents-upload input[type="file"] { overflow: hidden; }
+  .documents-upload input[type="file"]::file-selector-button {
+    max-width: 48%; margin-right: 8px; padding: 8px 9px; border: 0;
+    border-radius: 9px; background: #eee6fb; color: #56328d;
+    font: inherit; font-size: 12px; font-weight: 700;
+  }
+  .documents-upload button { min-height: 46px; padding: 11px 12px; font-size: 13px; }
+
+  .document-upload-progress {
+    margin: 12px 0 !important; padding: 14px !important; border-radius: 15px !important;
+  }
+  .document-upload-progress-top { gap: 9px !important; }
+  .document-upload-progress-icon {
+    flex-basis: 40px !important; height: 40px !important; border-radius: 12px !important;
+  }
+  .document-upload-progress-copy strong { font-size: 13px !important; }
+  .document-upload-progress-copy span { font-size: 11px !important; }
+  .document-upload-progress-steps { gap: 4px !important; font-size: 9px !important; }
+  .document-upload-progress > p { font-size: 10px !important; line-height: 1.4; }
+
+  .documents-group { margin-bottom: 18px; }
+  .documents-group h3 { font-size: 15px; line-height: 1.3; }
+  .documents-item { padding: 12px 10px; gap: 9px; border-radius: 14px; }
+  .documents-item > svg { width: 20px; height: 20px; }
+  .documents-item-info { flex-basis: calc(100% - 32px); }
+  .documents-item-info strong { font-size: 13px; line-height: 1.35; }
+  .documents-item-info span { font-size: 10.5px; }
+  .documents-item-actions { padding-left: 29px; gap: 6px; }
+  .documents-item-actions button {
+    min-height: 38px; padding: 7px 9px !important; border-radius: 9px; font-size: 11px;
+  }
+  .documents-item-actions button svg { width: 16px; height: 16px; }
+
+  .document-scan-buffer {
+    width: 15px !important; height: 15px !important; flex-basis: 15px !important;
+  }
+  .document-scan-label { font-size: 11px; }
+
+  .family-scanner-result {
+    margin: 14px 0 !important; padding: 13px !important;
+    border-radius: 14px !important; overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .family-scanner-result h3 { font-size: 16px; }
+  .family-scanner-result h4 { font-size: 14px; }
+  .family-scanner-result p, .family-scanner-result td, .family-scanner-result th {
+    font-size: 11.5px; overflow-wrap: anywhere;
+  }
+  .family-scanner-result table { min-width: 430px; }
+
+  .documents-empty { padding: 22px 10px; font-size: 12px; }
+  .documents-error, .documents-notice { overflow-wrap: anywhere; font-size: 12px; }
+  .dashboard-current-tab { padding: 16px; border-radius: 16px; }
+  .dashboard-logout { margin-bottom: 90px; min-height: 46px; font-size: 14px; }
+}
+
+@media (max-width: 360px) {
+  .dashboard-page { padding-left: 9px; padding-right: 9px; }
+  .dashboard-avatar { width: 42px; height: 42px; }
+  .dashboard-greeting h1 { font-size: 15px; }
+  .dashboard-greeting p { font-size: 10.5px; }
+  .dashboard-circle-button, .dashboard-icon-button {
+    min-width: 34px; min-height: 34px; padding: 5px;
+  }
+  .dashboard-categories { gap: 7px; }
+  .dashboard-category-pill { min-height: 64px; padding: 8px 5px; font-size: 11px; }
+  .dashboard-bottom-nav > button:not(.dashboard-floating-add) { font-size: 8px; }
+  .dashboard-bottom-nav > button:not(.dashboard-floating-add) svg { width: 17px; height: 17px; }
+  .dashboard-floating-add { width: 48px; height: 48px; }
+  .documents-item-actions { padding-left: 0; }
+  .documents-item-actions button { flex: 1 1 auto; justify-content: center; }
+  .document-upload-progress-steps { flex-wrap: wrap; }
+}
+
+@media (max-height: 520px) and (orientation: landscape) {
+  .family-modal-overlay { align-items: center; }
+  .family-modal { max-height: calc(100dvh - 12px); }
+  .dashboard-bottom-nav { min-height: 58px; }
+}
+
