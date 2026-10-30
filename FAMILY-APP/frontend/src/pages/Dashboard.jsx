@@ -309,47 +309,7 @@ const ALLOWED_EXTENSIONS = new Set([
   "pptx",
 ]);
 
-const DOCUMENT_TYPES = [
-  // Identity & KYC
-  "Aadhaar Card",
-  "PAN Card",
-  "Passport",
-  "Voter ID Card (EPIC)",
-  "Driving Licence",
 
-  // Birth & Family
-  "Birth Certificate",
-  "Marriage Certificate",
-  "Death Certificate",
-  "Family Member Certificate",
-  "Legal Heir Certificate",
-
-  // Education
-  "10th Class Marksheet",
-  "12th Class Marksheet",
-  "Degree Certificate",
-  "Diploma Certificate",
-  "Transfer Certificate",
-
-  // Banking & Finance
-  "Bank Passbook",
-  "Bank Statement",
-  "Fixed Deposit Receipt",
-  "Loan Agreement",
-
-  // Property
-  "Property Sale Deed",
-  "Property Tax Receipt",
-  "Encumbrance Certificate",
-
-  // Health
-  "Medical Report",
-  "Medical Prescription",
-  "Health Insurance Policy",
-
-  // Other
-  "Other Document",
-];
 
 // =====================================================
 // DOCUMENT API
@@ -421,9 +381,6 @@ function Documents({
   const [detailsLoadingId, setDetailsLoadingId] = useState(null);
   const [scanResult, setScanResult] = useState(null);
   const [scanError, setScanError] = useState("");
-
-  const [documentType, setDocumentType] =
-    useState("Aadhaar Card");
 
   const fileInputRef = useRef(null);
   const mountedRef = useRef(true);
@@ -544,7 +501,6 @@ function Documents({
         "/documents/upload-url",
         {
           memberId,
-          documentType,
           fileName: file.name,
           fileSize: file.size,
         }
@@ -616,7 +572,7 @@ function Documents({
         fileInputRef.current.value = "";
       }
 
-      setNotice("Document uploaded successfully.");
+      setNotice("Document uploaded successfully. AI is analyzing and classifying it automatically.");
 
       await loadDocuments();
     } catch (err) {
@@ -779,7 +735,7 @@ function Documents({
   const grouped = documents.reduce(
     (groups, document) => {
       const key =
-        document.documentType || "Other";
+        document.documentType || "Other Document";
 
       (groups[key] ||= []).push(document);
 
@@ -909,24 +865,6 @@ function Documents({
           disabled={busy}
         />
 
-        <label htmlFor="documents-type">
-          Document category
-        </label>
-
-        <select
-          id="documents-type"
-          value={documentType}
-          onChange={(event) =>
-            setDocumentType(event.target.value)
-          }
-          disabled={busy}
-        >
-          {DOCUMENT_TYPES.map((type) => (
-            <option key={type} value={type}>
-              {type}
-            </option>
-          ))}
-        </select>
 
         <button
           type="submit"
